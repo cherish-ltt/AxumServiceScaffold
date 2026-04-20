@@ -13,6 +13,7 @@ use crate::domain::{
     services::example::ExampleUseCase,
 };
 
+#[derive(Default)]
 pub struct ExampleService;
 
 impl ExampleService {
