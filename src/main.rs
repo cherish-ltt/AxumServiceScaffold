@@ -1,7 +1,10 @@
 use anyhow::Result;
-use axum_service_scaffold::{app::build_app, config::AppConfig, logging, state::AppState};
+use axum_service_scaffold::{
+    container::Container, create_app::create_app, infrastructure::config::AppConfig, logging,
+};
 use dotenv::dotenv;
 use mimalloc::MiMalloc;
+use std::sync::Arc;
 use tracing::info;
 
 /// 全局内存分配器。
@@ -26,9 +29,9 @@ async fn main() -> Result<()> {
     let config = AppConfig::from_env()?;
     logging::init(&config);
 
-    let state = AppState::bootstrap(config).await?;
-    let app = build_app(state.clone());
-    let address = state.config.server.socket_addr()?;
+    let container = Arc::new(Container::bootstrap(config).await?);
+    let app = create_app(container.clone());
+    let address = container.config.server.socket_addr()?;
 
     let listener = tokio::net::TcpListener::bind(address).await?;
     info!(address = %address, "HTTP 服务启动成功");

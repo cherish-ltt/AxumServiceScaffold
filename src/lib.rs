@@ -1,23 +1,15 @@
-//! 脚手架库入口。
-//!
-//! 这个库把通用 Web 服务所需的基础设施拆成独立模块，便于后续直接复用：
-//!
-//! - 配置加载
-//! - 数据库连接
-//! - JWT 鉴权
-//! - 统一响应与错误
-//! - Swagger 文档
-//! - 示例业务模块
+//! Axum 洋葱架构脚手架库入口。
 
-pub mod app;
-pub mod auth;
-pub mod config;
-pub mod db;
+pub mod api;
+pub mod container;
+pub mod create_app;
 #[cfg(debug_assertions)]
 pub mod docs;
+pub mod domain;
 pub mod entities;
 pub mod error;
+pub mod infrastructure;
 pub mod logging;
-pub mod modules;
 pub mod response;
-pub mod state;
+pub mod services;
+pub mod util;

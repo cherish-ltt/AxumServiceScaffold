@@ -1,6 +1,6 @@
 use tracing_subscriber::{EnvFilter, fmt};
 
-use crate::config::AppConfig;
+use crate::infrastructure::config::AppConfig;
 
 /// 初始化全局日志。
 ///
