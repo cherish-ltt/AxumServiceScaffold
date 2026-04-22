@@ -1,6 +1,7 @@
 use std::{env, net::SocketAddr, str::FromStr};
 
 use anyhow::{Context, Result, anyhow};
+use tracing_appender::rolling::Rotation;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -33,6 +34,7 @@ pub struct DatabaseConfig {
     pub min_connections: u32,
     pub max_connections: u32,
     pub connect_timeout_secs: u64,
+    pub idle_secs: u64,
     pub sqlx_logging: bool,
 }
 
@@ -47,6 +49,14 @@ pub struct JwtConfig {
 #[derive(Debug, Clone)]
 pub struct LoggingConfig {
     pub filter: String,
+    pub utc_offset_hour: i8,
+    pub utc_offset_minute: i8,
+    pub utc_offset_second: i8,
+    pub filename_prefix: String,
+    pub filename_suffix: String,
+    pub rotation: Rotation,
+    pub max_log_files: usize,
+    pub out_dir: String,
 }
 
 impl AppConfig {
@@ -64,6 +74,7 @@ impl AppConfig {
             min_connections: parse_env_or("DATABASE_MIN_CONNECTIONS", 1u32)?,
             max_connections: parse_env_or("DATABASE_MAX_CONNECTIONS", 10u32)?,
             connect_timeout_secs: parse_env_or("DATABASE_CONNECT_TIMEOUT_SECS", 8u64)?,
+            idle_secs: parse_env_or("DATABASE_IDLE_SECS", 30u64)?,
             sqlx_logging: parse_env_or("DATABASE_SQLX_LOGGING", false)?,
         };
 
@@ -80,6 +91,21 @@ impl AppConfig {
 
         let logging = LoggingConfig {
             filter: get_env_or("LOG_FILTER", "info,tower_http=info"),
+            utc_offset_hour: parse_env_or("LOG_UTC_OFFSET_HOUR", 0_i8)?,
+            utc_offset_minute: parse_env_or("LOG_UTC_OFFSET_MINUTE", 0_i8)?,
+            utc_offset_second: parse_env_or("LOG_UTC_OFFSET_SECOND", 0_i8)?,
+            filename_prefix: get_env_or("LOG_FILENAME_PREFIX", "app"),
+            filename_suffix: get_env_or("LOG_FILENAME_SUFFIX", "log"),
+            rotation: match get_env_or("LOG_FILTER", "Rotation::DAILY").as_str() {
+                "Rotation::DAILY" => Rotation::DAILY,
+                "Rotation::HOURLY" => Rotation::HOURLY,
+                "Rotation::MINUTELY" => Rotation::MINUTELY,
+                "Rotation::NEVER" => Rotation::NEVER,
+                "Rotation::WEEKLY" => Rotation::WEEKLY,
+                _ => Rotation::DAILY,
+            },
+            max_log_files: parse_env_or("LOG_MAX_LOG_FILES", 30_usize)?,
+            out_dir: get_env_or("LOG_OUT_DIR", "/var/log/axum-app"),
         };
 
         Ok(Self {

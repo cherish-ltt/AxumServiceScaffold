@@ -1,6 +1,6 @@
 [package]
 name = "axum-service-scaffold"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Guardian team"]
 license = "MIT"
@@ -16,7 +16,7 @@ async-trait = "0.1"
 thiserror = "1.0"
 
 # Web 框架与 HTTP 中间件
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 mime = "0.3"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
@@ -45,7 +45,9 @@ jsonwebtoken = "9"
 
 # 可观测性
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time", "local-time"] }
+tracing-appender = "0.2.5"
+time = { version = "0.3.47", features = ["macros"] }
 
 # OpenAPI 与调试文档
 utoipa = "5"

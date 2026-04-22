@@ -11,6 +11,7 @@ pub async fn connect_database(config: &DatabaseConfig) -> Result<DatabaseConnect
         .min_connections(config.min_connections)
         .max_connections(config.max_connections)
         .connect_timeout(Duration::from_secs(config.connect_timeout_secs))
+        .idle_timeout(Duration::from_secs(config.idle_secs))
         .sqlx_logging(config.sqlx_logging);
 
     let database = Database::connect(options)

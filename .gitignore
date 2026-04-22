@@ -28,3 +28,6 @@ Thumbs.db
 design-docs
 .opencode
 codex-x86_64-pc-windows-msvc.exe
+
+# 日志
+/log/
