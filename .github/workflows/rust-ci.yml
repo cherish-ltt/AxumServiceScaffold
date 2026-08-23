@@ -1,0 +1,44 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 安装指定版本（1.98）的工具链，并附带 rustfmt 和 clippy 组件
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98"
+          components: rustfmt, clippy
+
+      # 可选：确认当前工具链（调试用）
+      - name: Show rustup info
+        run: rustup show
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy (lints)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build the project
+        run: cargo build --verbose
+
+      - name: Run tests
+        run: cargo test --verbose
