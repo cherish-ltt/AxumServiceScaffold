@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use sea_orm::{ConnectOptions, ConnectionTrait, Database, DatabaseConnection, Statement};
+use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 
 use crate::infrastructure::config::DatabaseConfig;
 
@@ -24,11 +24,8 @@ pub async fn connect_database(config: &DatabaseConfig) -> Result<DatabaseConnect
 }
 
 pub async fn ping_database(database: &DatabaseConnection) -> Result<()> {
-    let backend = database.get_database_backend();
-    database
-        .execute(Statement::from_string(backend, "SELECT 1".to_string()))
-        .await
-        .context("数据库健康检查失败")?;
+    let _backend = database.get_database_backend();
+    database.ping().await.context("数据库健康检查失败")?;
 
     Ok(())
 }
