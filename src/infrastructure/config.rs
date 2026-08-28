@@ -98,7 +98,9 @@ impl AppConfig {
             || database.min_connections == 0
             || database.min_connections > database.max_connections
         {
-            return Err(anyhow!("数据库连接池参数无效：需要 0 < min_connections <= max_connections"));
+            return Err(anyhow!(
+                "数据库连接池参数无效：需要 0 < min_connections <= max_connections"
+            ));
         }
         if database.connect_timeout_secs == 0 || database.idle_secs == 0 {
             return Err(anyhow!("数据库连接超时和空闲超时必须大于 0"));

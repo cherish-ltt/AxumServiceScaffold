@@ -57,7 +57,9 @@ impl AuthUseCase for AuthService {
             .split_once(char::is_whitespace)
             .ok_or_else(|| AppError::unauthorized("Authorization 格式应为 Bearer <token>"))?;
         if !scheme.eq_ignore_ascii_case("Bearer") || token.trim().is_empty() {
-            return Err(AppError::unauthorized("Authorization 格式应为 Bearer <token>"));
+            return Err(AppError::unauthorized(
+                "Authorization 格式应为 Bearer <token>",
+            ));
         }
 
         let claims = self.jwt_service.verify_access_token(token.trim())?;

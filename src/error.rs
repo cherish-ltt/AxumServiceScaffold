@@ -13,9 +13,9 @@ impl IntoResponse for AppError {
         let status =
             StatusCode::from_u16(self.http_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let message = match status {
-            StatusCode::BAD_REQUEST
-            | StatusCode::UNAUTHORIZED
-            | StatusCode::NOT_FOUND => self.to_string(),
+            StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED | StatusCode::NOT_FOUND => {
+                self.to_string()
+            }
             StatusCode::SERVICE_UNAVAILABLE => {
                 error!(error = %self, "服务不可用");
                 "服务暂不可用".to_string()

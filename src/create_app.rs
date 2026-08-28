@@ -14,7 +14,9 @@ pub fn create_app(container: Arc<Container>) -> Router {
         .route("/", get(api::controllers::system_controller::root))
         .nest("/api/v1", api::router())
         .layer(CorsLayer::permissive())
-        .layer(PropagateRequestIdLayer::new(HeaderValue::from_static("x-request-id")))
+        .layer(PropagateRequestIdLayer::new(HeaderValue::from_static(
+            "x-request-id",
+        )))
         .layer(SetRequestIdLayer::new(
             HeaderValue::from_static("x-request-id"),
             MakeRequestUuid,
