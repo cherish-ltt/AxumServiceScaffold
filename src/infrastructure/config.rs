@@ -108,6 +108,11 @@ impl AppConfig {
             return Err(anyhow!("数据库连接超时和空闲超时必须大于 0"));
         }
 
+        let max_log_files = parse_env_or("LOG_MAX_LOG_FILES", 30_usize)?;
+        if max_log_files == 0 {
+            return Err(anyhow!("LOG_MAX_LOG_FILES 必须大于 0"));
+        }
+
         let logging = LoggingConfig {
             filter: get_env_or("LOG_FILTER", "info,tower_http=info"),
             utc_offset_hour: parse_env_or("LOG_UTC_OFFSET_HOUR", 0_i8)?,
@@ -123,7 +128,7 @@ impl AppConfig {
                 "WEEKLY" | "Rotation::WEEKLY" => Rotation::WEEKLY,
                 value => return Err(anyhow!("不支持的日志轮转策略: {value}")),
             },
-            max_log_files: parse_env_or("LOG_MAX_LOG_FILES", 30_usize)?,
+            max_log_files,
             out_dir: get_env_or("LOG_OUT_DIR", "/var/log/axum-app"),
         };
 
