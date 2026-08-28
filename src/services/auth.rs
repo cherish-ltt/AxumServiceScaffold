@@ -52,12 +52,15 @@ impl AuthUseCase for AuthService {
         &self,
         authorization: &str,
     ) -> Result<CurrentUser, AppError> {
-        let token = authorization
-            .strip_prefix("Bearer ")
-            .or_else(|| authorization.strip_prefix("bearer "))
+        let (scheme, token) = authorization
+            .trim()
+            .split_once(char::is_whitespace)
             .ok_or_else(|| AppError::unauthorized("Authorization 格式应为 Bearer <token>"))?;
+        if !scheme.eq_ignore_ascii_case("Bearer") || token.trim().is_empty() {
+            return Err(AppError::unauthorized("Authorization 格式应为 Bearer <token>"));
+        }
 
-        let claims = self.jwt_service.verify_access_token(token)?;
+        let claims = self.jwt_service.verify_access_token(token.trim())?;
 
         Ok(CurrentUser {
             user_id: claims.sub,

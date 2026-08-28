@@ -52,7 +52,7 @@ impl JwtService {
             exp: expires_at.timestamp() as usize,
         };
 
-        let access_token = encode(&Header::default(), &claims, &self.encoding_key)?;
+        let access_token = encode(&Header::new(Algorithm::HS256), &claims, &self.encoding_key)?;
 
         Ok(AccessToken {
             access_token,
