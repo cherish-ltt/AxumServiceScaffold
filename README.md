@@ -260,6 +260,21 @@ DATABASE_URL=sqlite://scaffold.db?mode=rwc
 cargo run
 ```
 
+开发登录接口仅在 debug 构建中提供：
+
+```text
+POST /api/v1/auth/dev-login
+```
+
+不要在生产环境使用 `.env-public` 中的示例 JWT 密钥；生产构建不会暴露调试登录接口。
+
+健康检查语义：
+
+- `/api/v1/system/health`：进程存活检查，不依赖数据库，失败时不应继续接收流量。
+- `/api/v1/system/ready`：数据库就绪检查，数据库不可用时返回 `503 Service Unavailable`。
+
+服务收到 Ctrl-C 或 SIGTERM 后会停止接收新请求并优雅关闭。
+
 默认监听：
 
 - `http://127.0.0.1:8080`
@@ -304,18 +319,24 @@ cargo run
 
 ## 构建检查
 
-建议至少执行：
+建议执行：
 
 ```bash
-cargo fmt
-cargo check
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo check --all-targets
 cargo check --release
+cargo test --all-features
 ```
 
 这样可以同时确认：
 
-- 调试模式下 Swagger 正常
-- 发布模式下也可以干净通过构建
+- 调试模式下 Swagger 正常；
+- 发布模式下不会暴露开发登录接口；
+- 所有 feature 和 release 构建均可通过；
+- 测试和 Clippy 检查通过。
+
+应用启动时会创建 `_schema_migrations` 表，为后续版本化迁移保留入口。生产环境建议在部署阶段执行明确的迁移脚本，不要使用示例 JWT_SECRET。
 
 ## 备注
 
