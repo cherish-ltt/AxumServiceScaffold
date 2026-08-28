@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{Router, http::HeaderValue, routing::get};
+use axum::{Router, http::header::HeaderName, routing::get};
 use tower_http::{
     cors::CorsLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
@@ -14,11 +14,11 @@ pub fn create_app(container: Arc<Container>) -> Router {
         .route("/", get(api::controllers::system_controller::root))
         .nest("/api/v1", api::router())
         .layer(CorsLayer::permissive())
-        .layer(PropagateRequestIdLayer::new(HeaderValue::from_static(
+        .layer(PropagateRequestIdLayer::new(HeaderName::from_static(
             "x-request-id",
         )))
         .layer(SetRequestIdLayer::new(
-            HeaderValue::from_static("x-request-id"),
+            HeaderName::from_static("x-request-id"),
             MakeRequestUuid,
         ))
         .layer(TraceLayer::new_for_http())
