@@ -96,13 +96,13 @@ impl AppConfig {
             utc_offset_second: parse_env_or("LOG_UTC_OFFSET_SECOND", 0_i8)?,
             filename_prefix: get_env_or("LOG_FILENAME_PREFIX", "app"),
             filename_suffix: get_env_or("LOG_FILENAME_SUFFIX", "log"),
-            rotation: match get_env_or("LOG_FILTER", "Rotation::DAILY").as_str() {
+            rotation: match get_env_or("LOG_ROTATION", "DAILY").as_str() {
                 "Rotation::DAILY" => Rotation::DAILY,
                 "Rotation::HOURLY" => Rotation::HOURLY,
                 "Rotation::MINUTELY" => Rotation::MINUTELY,
                 "Rotation::NEVER" => Rotation::NEVER,
                 "Rotation::WEEKLY" => Rotation::WEEKLY,
-                _ => Rotation::DAILY,
+                value => return Err(anyhow!("不支持的日志轮转策略: {value}")),
             },
             max_log_files: parse_env_or("LOG_MAX_LOG_FILES", 30_usize)?,
             out_dir: get_env_or("LOG_OUT_DIR", "/var/log/axum-app"),
