@@ -88,8 +88,10 @@ impl AppConfig {
         if jwt.secret.len() < 32 {
             return Err(anyhow!("JWT_SECRET 长度至少需要 32 个字符"));
         }
-        if jwt.secret == "change-me-to-a-random-string-with-at-least-32-characters" {
-            return Err(anyhow!("JWT_SECRET 不能使用示例默认值"));
+        if app_env.eq_ignore_ascii_case("production")
+            && jwt.secret == "change-me-to-a-random-string-with-at-least-32-characters"
+        {
+            return Err(anyhow!("生产环境不能使用示例 JWT_SECRET"));
         }
         if jwt.access_token_ttl_minutes <= 0 {
             return Err(anyhow!("JWT_ACCESS_TOKEN_TTL_MINUTES 必须大于 0"));
