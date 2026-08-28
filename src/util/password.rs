@@ -1,7 +1,4 @@
-use argon2::{
-    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
-    password_hash::{SaltString, rand_core::OsRng},
-};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 
 use crate::error::AppError;
 
@@ -10,9 +7,8 @@ pub fn hash_password(password: &str) -> Result<String, AppError> {
         return Err(AppError::bad_request("密码不能为空"));
     }
 
-    let salt = SaltString::generate(&mut OsRng);
     Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map(|hashed| hashed.to_string())
         .map_err(|error| AppError::internal(format!("Argon2 哈希失败: {error}")))
 }
