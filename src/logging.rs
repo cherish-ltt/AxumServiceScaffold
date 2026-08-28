@@ -1,5 +1,6 @@
+use anyhow::{Context, Result};
 use time::{UtcOffset, macros::format_description};
-use tracing_appender::rolling::RollingFileAppender;
+use tracing_appender::{non_blocking::WorkerGuard, rolling::RollingFileAppender};
 use tracing_subscriber::{
     EnvFilter,
     fmt::{self, time::OffsetTime},
@@ -12,15 +13,16 @@ use crate::infrastructure::config::AppConfig;
 /// 初始化全局日志。
 ///
 /// 日志初始化应尽量早，这样启动阶段的配置错误与数据库错误也能被记录下来。
-pub fn init(config: &AppConfig) {
+pub fn init(config: &AppConfig) -> Result<WorkerGuard> {
     // 1. 配置时区和时间格式（东八区 UTC+8）
+    let offset = UtcOffset::from_hms(
+        config.logging.utc_offset_hour,
+        config.logging.utc_offset_minute,
+        config.logging.utc_offset_second,
+    )
+    .context("日志时区偏移配置无效")?;
     let timer = OffsetTime::new(
-        UtcOffset::from_hms(
-            config.logging.utc_offset_hour,
-            config.logging.utc_offset_minute,
-            config.logging.utc_offset_second,
-        )
-        .unwrap(), // 手动指定时区偏移
+        offset,
         // 自定义时间格式：年-月-日 时:分:秒.毫秒
         format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:5]"),
     );
@@ -37,11 +39,12 @@ pub fn init(config: &AppConfig) {
         .max_log_files(config.logging.max_log_files)
         // .latest_symlink("app.latest.log") // 需要对应平台权限
         .build(config.logging.out_dir.clone())
-        .expect("Failed to create file appender");
+        .context("创建日志文件 appender 失败")?;
+    let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
     // 3. 配置格式化层（输出到文件）
     let fmt_layer = fmt::layer()
-        .with_writer(file_appender)
+        .with_writer(file_writer)
         .with_ansi(false)
         .with_timer(timer.clone()); // 关闭文件中的 ANSI 颜色码（避免乱码）
 
@@ -57,5 +60,8 @@ pub fn init(config: &AppConfig) {
         .with(env_filter)
         .with(fmt_layer)
         .with(console_layer)
-        .init();
+        .try_init()
+        .context("初始化全局日志订阅者失败")?;
+
+    Ok(guard)
 }

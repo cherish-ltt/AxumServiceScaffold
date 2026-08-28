@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     dotenv().ok();
 
     let config = AppConfig::from_env()?;
-    logging::init(&config);
+    let _log_guard = logging::init(&config)?;
 
     let container = Arc::new(Container::bootstrap(config).await?);
     let app = create_app(container.clone());
