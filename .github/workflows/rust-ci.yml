@@ -17,11 +17,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 安装指定版本（1.98）的工具链，并附带 rustfmt 和 clippy 组件
+      # 使用稳定工具链，并附带 rustfmt 和 clippy 组件
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.98"
+          toolchain: stable
           components: rustfmt, clippy
 
       # 可选：确认当前工具链（调试用）
@@ -35,10 +35,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy (lints)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Build the project
-        run: cargo build --verbose
+        run: cargo build --release --verbose
+
+      - name: Check all features
+        run: cargo check --all-features --all-targets
 
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --all-features --verbose
