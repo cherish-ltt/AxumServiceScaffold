@@ -36,17 +36,8 @@ impl SystemUseCase for SystemService {
     }
 
     async fn health(&self) -> Result<HealthReport, AppError> {
-        let database_status = if ping_database(&self.database, 2).await.is_ok() {
-            "up".to_string()
-        } else {
-            "down".to_string()
-        };
-
-        let status = if database_status == "up" {
-            "ok".to_string()
-        } else {
-            "degraded".to_string()
-        };
+        let database_status = "not_checked".to_string();
+        let status = "ok".to_string();
 
         Ok(HealthReport {
             service_name: self.config.app_name.clone(),
@@ -59,8 +50,7 @@ impl SystemUseCase for SystemService {
     }
 
     async fn ready(&self) -> Result<(), AppError> {
-        let health = self.health().await?;
-        if health.database_status != "up" {
+        if ping_database(&self.database, 2).await.is_err() {
             return Err(AppError::unavailable("数据库尚未就绪"));
         }
 

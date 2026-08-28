@@ -47,11 +47,7 @@ pub async fn health(
 ) -> Result<impl IntoResponse, AppError> {
     let health = container.system_service.health().await?;
     let response: HealthResponse = health.into();
-    let status = if response.database_status == "up" {
-        StatusCode::OK
-    } else {
-        StatusCode::SERVICE_UNAVAILABLE
-    };
+    let status = StatusCode::OK;
 
     Ok((
         status,
