@@ -41,6 +41,9 @@ async fn main() -> Result<()> {
         .await?;
 
     info!("HTTP 服务已优雅关闭");
+    if let Err(error) = container.database.close_by_ref().await {
+        tracing::warn!(%error, "关闭数据库连接池失败");
+    }
     Ok(())
 }
 

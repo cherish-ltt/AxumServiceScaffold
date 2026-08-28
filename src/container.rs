@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use sea_orm::DatabaseConnection;
+
 use anyhow::Result;
 
 use crate::{
@@ -14,6 +16,7 @@ use crate::{
 
 pub struct Container {
     pub config: Arc<AppConfig>,
+    pub database: DatabaseConnection,
     pub auth_service: Arc<dyn AuthUseCase>,
     pub example_service: Arc<dyn ExampleUseCase>,
     pub system_service: Arc<dyn SystemUseCase>,
@@ -29,10 +32,11 @@ impl Container {
         let auth_service: Arc<dyn AuthUseCase> = Arc::new(AuthService::new(jwt_service));
         let example_service: Arc<dyn ExampleUseCase> = Arc::new(ExampleService::new());
         let system_service: Arc<dyn SystemUseCase> =
-            Arc::new(SystemService::new(config.clone(), database));
+            Arc::new(SystemService::new(config.clone(), database.clone()));
 
         Ok(Self {
             config,
+            database,
             auth_service,
             example_service,
             system_service,
