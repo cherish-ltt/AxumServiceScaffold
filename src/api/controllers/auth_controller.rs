@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use axum::{
-    Json, Router,
-    extract::State,
-    routing::{get, post},
-};
+use axum::{Json, Router, extract::State, routing::get};
+
+#[cfg(debug_assertions)]
+use axum::routing::post;
 
 use crate::{
     api::{
