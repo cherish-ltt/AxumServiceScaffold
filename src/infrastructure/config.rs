@@ -88,6 +88,21 @@ impl AppConfig {
         if jwt.secret.len() < 32 {
             return Err(anyhow!("JWT_SECRET 长度至少需要 32 个字符"));
         }
+        if jwt.secret == "change-me-to-a-random-string-with-at-least-32-characters" {
+            return Err(anyhow!("JWT_SECRET 不能使用示例默认值"));
+        }
+        if jwt.access_token_ttl_minutes <= 0 {
+            return Err(anyhow!("JWT_ACCESS_TOKEN_TTL_MINUTES 必须大于 0"));
+        }
+        if database.max_connections == 0
+            || database.min_connections == 0
+            || database.min_connections > database.max_connections
+        {
+            return Err(anyhow!("数据库连接池参数无效：需要 0 < min_connections <= max_connections"));
+        }
+        if database.connect_timeout_secs == 0 || database.idle_secs == 0 {
+            return Err(anyhow!("数据库连接超时和空闲超时必须大于 0"));
+        }
 
         let logging = LoggingConfig {
             filter: get_env_or("LOG_FILTER", "info,tower_http=info"),
