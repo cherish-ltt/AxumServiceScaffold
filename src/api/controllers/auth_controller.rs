@@ -20,9 +20,12 @@ use crate::{
 use crate::docs::{DocAccessTokenResponse, DocCurrentUserResponse, DocErrorResponse};
 
 pub fn router() -> Router<Arc<Container>> {
-    Router::new()
-        .route("/auth/dev-login", post(dev_login))
-        .route("/auth/me", get(me))
+    let router = Router::new().route("/auth/me", get(me));
+
+    #[cfg(debug_assertions)]
+    let router = router.route("/auth/dev-login", post(dev_login));
+
+    router
 }
 
 #[cfg_attr(debug_assertions, utoipa::path(
