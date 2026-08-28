@@ -36,7 +36,7 @@ impl SystemUseCase for SystemService {
     }
 
     async fn health(&self) -> Result<HealthReport, AppError> {
-        let database_status = if ping_database(&self.database).await.is_ok() {
+        let database_status = if ping_database(&self.database, 2).await.is_ok() {
             "up".to_string()
         } else {
             "down".to_string()

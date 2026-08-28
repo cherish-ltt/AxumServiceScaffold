@@ -4,7 +4,11 @@ use anyhow::Result;
 
 use crate::{
     domain::services::{auth::AuthUseCase, example::ExampleUseCase, system::SystemUseCase},
-    infrastructure::{config::AppConfig, databases::connect_database, services::jwt::JwtService},
+    infrastructure::{
+        config::AppConfig,
+        databases::{connect_database, run_migrations},
+        services::jwt::JwtService,
+    },
     services::{auth::AuthService, example::ExampleService, system::SystemService},
 };
 
@@ -19,6 +23,7 @@ impl Container {
     pub async fn bootstrap(config: AppConfig) -> Result<Self> {
         let config = Arc::new(config);
         let database = connect_database(&config.database).await?;
+        run_migrations(&database).await?;
         let jwt_service = Arc::new(JwtService::new(config.jwt.clone())?);
 
         let auth_service: Arc<dyn AuthUseCase> = Arc::new(AuthService::new(jwt_service));
