@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="doc/assets/logo.png" alt="Axum Service Scaffold Logo" width="240" />
+  <img src="docs/assets/logo.png" alt="Axum Service Scaffold Logo" width="240" />
   <h1>Axum Service Scaffold</h1>
 </div>
 
