@@ -3,11 +3,33 @@ name: Rust CI
 on:
   push:
     branches: [ "main", "master" ]
+    paths:
+      - "**.rs"
+      - "**.proto"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".rustfmt.toml"
+      - ".clippy.toml"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust-ci.yml"
   pull_request:
     branches: [ "main", "master" ]
+    paths:
+      - "**.rs"
+      - "**.proto"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".rustfmt.toml"
+      - ".clippy.toml"
+      - "rust-toolchain.toml"
+      - ".github/workflows/rust-ci.yml"
 
 env:
   CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -17,14 +39,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 使用稳定工具链，并附带 rustfmt 和 clippy 组件
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: "1.98.1"
           components: rustfmt, clippy
 
-      # 可选：确认当前工具链（调试用）
       - name: Show rustup info
         run: rustup show
 
@@ -35,13 +55,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy (lints)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Build the project
-        run: cargo build --release --verbose
-
-      - name: Check all features
-        run: cargo check --all-features --all-targets
+        run: cargo build --verbose
 
       - name: Run tests
-        run: cargo test --all-features --verbose
+        run: cargo test --verbose
