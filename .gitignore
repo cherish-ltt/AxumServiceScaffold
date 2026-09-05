@@ -31,3 +31,5 @@ codex-x86_64-pc-windows-msvc.exe
 
 # 日志
 /log/
+# 符号文件
+*.pdb
