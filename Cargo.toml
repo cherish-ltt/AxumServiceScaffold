@@ -60,7 +60,7 @@ validator = { version = "=0.21.0", features = ["derive"], optional = true }
 
 # 鉴权与密码学
 argon2 = "=0.6.0"
-jsonwebtoken = "=11"
+jsonwebtoken = { version = "=11", features = ["aws_lc_rs"] }
 
 # 可观测性
 tracing = "=0.1"

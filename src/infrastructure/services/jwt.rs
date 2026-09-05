@@ -71,3 +71,82 @@ impl JwtService {
             .map_err(|_| AppError::unauthorized("访问令牌无效或已过期"))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::JwtService;
+    use crate::{domain::error::AppError, infrastructure::config::JwtConfig};
+
+    const TEST_SECRET: &str = "jwt-unit-test-secret-that-is-long-enough";
+
+    fn config(secret: &str, ttl_minutes: i64) -> JwtConfig {
+        JwtConfig {
+            secret: secret.to_string(),
+            issuer: "test-issuer".to_string(),
+            audience: "test-audience".to_string(),
+            access_token_ttl_minutes: ttl_minutes,
+        }
+    }
+
+    #[test]
+    fn short_secret_is_rejected() {
+        assert!(JwtService::new(config("short", 120)).is_err());
+    }
+
+    #[test]
+    fn issued_token_verifies_roundtrip() {
+        let service = JwtService::new(config(TEST_SECRET, 120)).expect("构建 JWT 服务");
+        let token = service
+            .issue_access_token("user-1", "alice", &["admin".to_string()])
+            .expect("签发令牌");
+
+        assert_eq!(token.token_type, "Bearer");
+        assert_eq!(token.expires_in_seconds, 120 * 60);
+
+        let claims = service
+            .verify_access_token(&token.access_token)
+            .expect("校验令牌");
+        assert_eq!(claims.sub, "user-1");
+        assert_eq!(claims.username, "alice");
+        assert_eq!(claims.roles, vec!["admin".to_string()]);
+        assert_eq!(claims.iss, "test-issuer");
+        assert_eq!(claims.aud, "test-audience");
+        assert!(claims.exp > claims.iat);
+    }
+
+    #[test]
+    fn invalid_token_is_unauthorized() {
+        let service = JwtService::new(config(TEST_SECRET, 120)).expect("构建 JWT 服务");
+
+        let error = service
+            .verify_access_token("not-a-jwt")
+            .expect_err("无效令牌应被拒绝");
+        assert!(matches!(error, AppError::Unauthorized(_)));
+    }
+
+    #[test]
+    fn token_signed_with_other_secret_is_rejected() {
+        let service = JwtService::new(config(TEST_SECRET, 120)).expect("构建 JWT 服务");
+        let other = JwtService::new(config("another-secret-that-is-long-enough!!!", 120))
+            .expect("构建另一个 JWT 服务");
+        let token = other
+            .issue_access_token("user-1", "alice", &[])
+            .expect("签发令牌");
+
+        assert!(service.verify_access_token(&token.access_token).is_err());
+    }
+
+    #[test]
+    fn expired_token_is_rejected() {
+        // 负 TTL 生成已过期令牌（jsonwebtoken 默认 60 秒 leeway，因此回退 5 分钟）。
+        let service = JwtService::new(config(TEST_SECRET, -5)).expect("构建 JWT 服务");
+        let token = service
+            .issue_access_token("user-1", "alice", &[])
+            .expect("签发令牌");
+
+        let error = service
+            .verify_access_token(&token.access_token)
+            .expect_err("过期令牌应被拒绝");
+        assert!(matches!(error, AppError::Unauthorized(_)));
+    }
+}
