@@ -1,5 +1,9 @@
 # Axum Service Scaffold
 
+<div align="center">
+  <img src="doc/assets/logo.png" alt="Axum Service Scaffold Logo" width="240" />
+</div>
+
 一个面向 `axum + sea-orm` 的 Rust 空白脚手架，已经改成参考 `demo` 的洋葱架构组织方式，但保留了当前项目原本的技术选型：
 
 - Web 框架仍然是 `axum`
@@ -347,3 +351,30 @@ cargo test --all-features
 - 真实项目里你需要按业务补全实体、仓储、事务和测试
 
 但骨架已经调整成更适合长期扩展的形态了。
+
+## 贡献指南
+
+提交代码前请先阅读 [AGENTS.md](AGENTS.md)，它是本项目的开发规范（开发宪法），包含：
+
+- Git 提交规范（`<type>: <中文描述>`，每次提交对应一个逻辑变更）
+- Rust CI 标准、`.rustfmt.toml` 与 `.clippy.toml` 配置
+- Cargo.toml 依赖管理与版本锁定要求
+- DDD + 洋葱架构的项目结构约束
+
+所有变更必须通过以下检查后才能提交：
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets -- -D warnings
+cargo build
+cargo test
+```
+
+单元测试覆盖率使用 `cargo llvm-cov` 检测，要求不低于 80%。
+
+
+---
+
+<div align="center">
+  <sub>Built with ❤️ by the AxumServiceScaffold team</sub>
+</div>
