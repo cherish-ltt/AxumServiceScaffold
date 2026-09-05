@@ -248,4 +248,11 @@ msrv = "1.98.1"
 - `Cargo.toml` 中必须保持 `jsonwebtoken = { version = "=11", features = ["aws_lc_rs"] }`，与 rustls 使用的 `aws-lc-rs` 后端保持一致。
 - 升级 `jsonwebtoken` 时需确认其加密后端特性仍然被显式启用。
 
+### 10.3 双许可协议
+
+- 项目采用 `MIT OR Apache-2.0` 双许可，使用者可任选其一遵循。
+- `Cargo.toml` 的 `license` 字段必须保持 `MIT OR Apache-2.0`。
+- 许可证文本分文件存放：`LICENSE-MIT`（MIT 全文）与 `LICENSE-APACHE`（Apache-2.0 全文），不要合并进单个 LICENSE 文件。
+- README 的「许可证」章节需说明双许可及各自文本文件的位置。
+
 ```

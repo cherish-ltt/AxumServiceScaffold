@@ -1,7 +1,6 @@
-# Axum Service Scaffold
-
 <div align="center">
   <img src="doc/assets/logo.png" alt="Axum Service Scaffold Logo" width="240" />
+  <h1>Axum Service Scaffold</h1>
 </div>
 
 一个面向 `axum + sea-orm` 的 Rust 空白脚手架，已经改成参考 `demo` 的洋葱架构组织方式，但保留了当前项目原本的技术选型：
@@ -371,6 +370,13 @@ cargo test
 ```
 
 单元测试覆盖率使用 `cargo llvm-cov` 检测，要求不低于 80%。
+
+## 许可证
+
+本项目采用 [MIT OR Apache-2.0](https://opensource.org/licenses) 双许可，使用者可任选其一遵循：
+
+- MIT 许可证全文见 [LICENSE-MIT](LICENSE-MIT)
+- Apache-2.0 许可证全文见 [LICENSE-APACHE](LICENSE-APACHE)
 
 
 ---
