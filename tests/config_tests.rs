@@ -1,44 +1,335 @@
 use std::env;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use axum_service_scaffold::infrastructure::config::AppConfig;
+use axum_service_scaffold::infrastructure::config::{AppConfig, ServerConfig};
 
-fn restore(key: &str, previous: Option<String>) {
-    match previous {
-        Some(value) => unsafe { env::set_var(key, value) },
-        None => unsafe { env::remove_var(key) },
+/// 环境变量是进程级全局状态，所有依赖环境变量的测试必须串行执行，避免相互污染。
+static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn env_lock() -> MutexGuard<'static, ()> {
+    ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn set_var(key: &str, value: &str) {
+    unsafe { env::set_var(key, value) };
+}
+
+fn remove_var(key: &str) {
+    unsafe { env::remove_var(key) };
+}
+
+/// 临时设置环境变量后执行断言，结束时恢复原始值。
+fn with_env<F: FnOnce()>(vars: &[(&str, Option<&str>)], assertion: F) {
+    let _lock = env_lock();
+    let saved: Vec<(String, Option<String>)> = vars
+        .iter()
+        .map(|(key, _)| (key.to_string(), env::var(key).ok()))
+        .collect();
+
+    for (key, value) in vars {
+        match value {
+            Some(value) => set_var(key, value),
+            None => remove_var(key),
+        }
     }
+
+    assertion();
+
+    for (key, value) in saved {
+        match value {
+            Some(value) => set_var(&key, &value),
+            None => remove_var(&key),
+        }
+    }
+}
+
+const EXAMPLE_SECRET: &str = "change-me-to-a-random-string-with-at-least-32-characters";
+const CUSTOM_SECRET: &str = "unit-test-secret-that-is-definitely-long-enough";
+
+/// Rotation 的 Debug 输出为 PascalCase（如 Daily），统一小写后比较。
+fn rotation_debug(rotation: &tracing_appender::rolling::Rotation) -> String {
+    format!("{rotation:?}").to_lowercase()
+}
+
+#[test]
+fn valid_config_loads_with_defaults() {
+    with_env(
+        &[
+            ("APP_NAME", None),
+            ("APP_ENV", None),
+            ("SERVER_HOST", None),
+            ("SERVER_PORT", None),
+            ("DATABASE_URL", None),
+            ("DATABASE_MIN_CONNECTIONS", None),
+            ("DATABASE_MAX_CONNECTIONS", None),
+            ("DATABASE_CONNECT_TIMEOUT_SECS", None),
+            ("DATABASE_IDLE_SECS", None),
+            ("DATABASE_SQLX_LOGGING", None),
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("JWT_ISSUER", None),
+            ("JWT_AUDIENCE", None),
+            ("JWT_ACCESS_TOKEN_TTL_MINUTES", None),
+            ("LOG_FILTER", None),
+            ("LOG_UTC_OFFSET_HOUR", None),
+            ("LOG_UTC_OFFSET_MINUTE", None),
+            ("LOG_UTC_OFFSET_SECOND", None),
+            ("LOG_FILENAME_PREFIX", None),
+            ("LOG_FILENAME_SUFFIX", None),
+            ("LOG_ROTATION", None),
+            ("LOG_MAX_LOG_FILES", None),
+            ("LOG_OUT_DIR", None),
+        ],
+        || {
+            let config = AppConfig::from_env().expect("默认配置应可加载");
+
+            assert_eq!(config.app_name, "axum-service-scaffold");
+            assert_eq!(config.app_env, "development");
+            assert_eq!(config.server.host, "127.0.0.1");
+            assert_eq!(config.server.port, 8080);
+            assert_eq!(config.database.url, "sqlite://scaffold.db?mode=rwc");
+            assert_eq!(config.database.min_connections, 1);
+            assert_eq!(config.database.max_connections, 10);
+            assert_eq!(config.database.connect_timeout_secs, 8);
+            assert_eq!(config.database.idle_secs, 30);
+            assert!(!config.database.sqlx_logging);
+            assert_eq!(config.jwt.issuer, "axum-service-scaffold");
+            assert_eq!(config.jwt.audience, "axum-service-clients");
+            assert_eq!(config.jwt.access_token_ttl_minutes, 120);
+            assert_eq!(config.logging.filter, "info,tower_http=info");
+            assert_eq!(config.logging.filename_prefix, "app");
+            assert_eq!(config.logging.filename_suffix, "log");
+            assert_eq!(config.logging.max_log_files, 30);
+            assert_eq!(config.logging.out_dir, "/var/log/axum-app");
+            assert!(rotation_debug(&config.logging.rotation).contains("daily"));
+        },
+    );
+}
+
+#[test]
+fn custom_overrides_are_applied() {
+    with_env(
+        &[
+            ("APP_NAME", Some("custom-app")),
+            ("APP_ENV", Some("staging")),
+            ("SERVER_PORT", Some("9000")),
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("JWT_ACCESS_TOKEN_TTL_MINUTES", Some("30")),
+            ("DATABASE_SQLX_LOGGING", Some("true")),
+            ("LOG_ROTATION", Some("HOURLY")),
+            ("LOG_MAX_LOG_FILES", Some("7")),
+        ],
+        || {
+            let config = AppConfig::from_env().expect("自定义配置应可加载");
+
+            assert_eq!(config.app_name, "custom-app");
+            assert_eq!(config.app_env, "staging");
+            assert_eq!(config.server.port, 9000);
+            assert_eq!(config.jwt.access_token_ttl_minutes, 30);
+            assert!(config.database.sqlx_logging);
+            assert_eq!(config.logging.max_log_files, 7);
+            assert!(rotation_debug(&config.logging.rotation).contains("hourly"));
+        },
+    );
+}
+
+#[test]
+fn supported_log_rotation_variants_parse() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("LOG_ROTATION", Some("DAILY")),
+        ],
+        || {
+            for variant in ["daily", "hourly", "minutely", "weekly", "never"] {
+                set_var("LOG_ROTATION", &variant.to_uppercase());
+                let config = AppConfig::from_env().expect("支持的轮转策略应可解析");
+                assert!(rotation_debug(&config.logging.rotation).contains(variant));
+            }
+
+            for variant in ["Rotation::DAILY", "Rotation::WEEKLY"] {
+                set_var("LOG_ROTATION", variant);
+                let config = AppConfig::from_env().expect("兼容写法应可解析");
+                let expected = variant.rsplit("::").next().unwrap_or("").to_lowercase();
+                assert!(rotation_debug(&config.logging.rotation).contains(&expected));
+            }
+        },
+    );
+}
+
+#[test]
+fn production_accepts_custom_secret() {
+    with_env(
+        &[
+            ("APP_ENV", Some("production")),
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+        ],
+        || {
+            let result = AppConfig::from_env();
+            assert!(result.is_ok());
+        },
+    );
 }
 
 #[test]
 fn production_rejects_example_jwt_secret() {
-    let keys = ["APP_ENV", "JWT_SECRET"];
-    let previous: Vec<_> = keys.iter().map(|key| env::var(key).ok()).collect();
-
-    unsafe {
-        env::set_var("APP_ENV", "production");
-        env::set_var(
-            "JWT_SECRET",
-            "change-me-to-a-random-string-with-at-least-32-characters",
-        );
-    }
-
-    let result = AppConfig::from_env();
-
-    for (key, value) in keys.iter().zip(previous) {
-        restore(key, value);
-    }
-
-    assert!(result.is_err());
+    with_env(
+        &[
+            ("APP_ENV", Some("production")),
+            ("JWT_SECRET", Some(EXAMPLE_SECRET)),
+        ],
+        || {
+            let result = AppConfig::from_env();
+            assert!(result.is_err());
+        },
+    );
 }
 
 #[test]
-fn invalid_pool_settings_are_rejected() {
-    let key = "DATABASE_MIN_CONNECTIONS";
-    let previous = env::var(key).ok();
-    unsafe { env::set_var(key, "11") };
+fn missing_jwt_secret_is_rejected() {
+    with_env(&[("JWT_SECRET", None)], || {
+        let error = AppConfig::from_env().expect_err("缺少 JWT_SECRET 应被拒绝");
+        assert!(error.to_string().contains("缺少必需环境变量"));
+    });
+}
 
-    let result = AppConfig::from_env();
-    restore(key, previous);
+#[test]
+fn short_jwt_secret_is_rejected() {
+    with_env(&[("JWT_SECRET", Some("too-short"))], || {
+        let error = AppConfig::from_env().expect_err("过短的 JWT_SECRET 应被拒绝");
+        assert!(error.to_string().contains("长度至少需要 32"));
+    });
+}
 
-    assert!(result.is_err());
+#[test]
+fn non_positive_token_ttl_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("JWT_ACCESS_TOKEN_TTL_MINUTES", Some("0")),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("非正数 TTL 应被拒绝");
+            assert!(error.to_string().contains("必须大于 0"));
+        },
+    );
+}
+
+#[test]
+fn zero_min_connections_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("DATABASE_MIN_CONNECTIONS", Some("0")),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("0 最小连接数应被拒绝");
+            assert!(error.to_string().contains("连接池参数无效"));
+        },
+    );
+}
+
+#[test]
+fn min_connections_above_max_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("DATABASE_MIN_CONNECTIONS", Some("11")),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("最小连接数大于最大连接数应被拒绝");
+            assert!(error.to_string().contains("连接池参数无效"));
+        },
+    );
+}
+
+#[test]
+fn zero_connect_timeout_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("DATABASE_CONNECT_TIMEOUT_SECS", Some("0")),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("0 连接超时应被拒绝");
+            assert!(error.to_string().contains("超时必须大于 0"));
+        },
+    );
+}
+
+#[test]
+fn zero_idle_timeout_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("DATABASE_IDLE_SECS", Some("0")),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("0 空闲超时应被拒绝");
+            assert!(error.to_string().contains("超时必须大于 0"));
+        },
+    );
+}
+
+#[test]
+fn zero_max_log_files_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("LOG_MAX_LOG_FILES", Some("0")),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("0 日志文件数应被拒绝");
+            assert!(error.to_string().contains("LOG_MAX_LOG_FILES 必须大于 0"));
+        },
+    );
+}
+
+#[test]
+fn unsupported_log_rotation_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("LOG_ROTATION", Some("YEARLY")),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("不支持的轮转策略应被拒绝");
+            assert!(error.to_string().contains("不支持的日志轮转策略"));
+        },
+    );
+}
+
+#[test]
+fn invalid_server_port_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("SERVER_PORT", Some("not-a-number")),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("非法端口应被拒绝");
+            assert!(error.to_string().contains("解析失败"));
+        },
+    );
+}
+
+#[test]
+fn socket_addr_parses_valid_host() {
+    let server = ServerConfig {
+        host: "127.0.0.1".to_string(),
+        port: 8080,
+    };
+    let address = server.socket_addr().expect("合法地址应可解析");
+    assert_eq!(address.to_string(), "127.0.0.1:8080");
+}
+
+#[test]
+fn socket_addr_rejects_invalid_host() {
+    let server = ServerConfig {
+        host: "invalid host".to_string(),
+        port: 8080,
+    };
+    assert!(server.socket_addr().is_err());
 }

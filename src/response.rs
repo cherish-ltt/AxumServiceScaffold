@@ -46,3 +46,48 @@ impl ApiResponse<()> {
         Self::with_parts(code, message, None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ApiResponse;
+
+    #[test]
+    fn ok_variants_use_success_defaults() {
+        let response = ApiResponse::ok("data");
+        assert_eq!(response.code, 200);
+        assert_eq!(response.message, "成功");
+        assert_eq!(response.data, Some("data"));
+        assert!(response.timestamp > 0);
+
+        let response = ApiResponse::ok_with_message("创建成功", "data");
+        assert_eq!(response.code, 200);
+        assert_eq!(response.message, "创建成功");
+        assert!(response.data.is_some());
+
+        let response = ApiResponse::<()>::message("服务已就绪");
+        assert_eq!(response.code, 200);
+        assert!(response.data.is_none());
+
+        let response = ApiResponse::<()>::error(503, "服务暂不可用");
+        assert_eq!(response.code, 503);
+        assert_eq!(response.message, "服务暂不可用");
+
+        let response = ApiResponse::<&str>::with_parts(404, "资源缺失", None);
+        assert_eq!(response.code, 404);
+        assert!(response.data.is_none());
+    }
+
+    #[test]
+    fn none_data_is_skipped_when_serializing() {
+        let with_data = serde_json::to_value(ApiResponse::ok("x")).expect("序列化成功响应");
+        assert!(with_data.get("data").is_some());
+
+        let without_data =
+            serde_json::to_value(ApiResponse::<()>::message("ok")).expect("序列化消息响应");
+        assert!(without_data.get("data").is_none());
+
+        let parsed: ApiResponse<String> = serde_json::from_value(with_data).expect("反序列化响应");
+        assert_eq!(parsed.message, "成功");
+        assert_eq!(parsed.data.as_deref(), Some("x"));
+    }
+}

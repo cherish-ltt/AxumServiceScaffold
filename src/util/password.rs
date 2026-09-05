@@ -29,6 +29,7 @@ pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, AppE
 #[cfg(test)]
 mod tests {
     use super::{hash_password, verify_password};
+    use crate::error::AppError;
 
     #[test]
     fn password_roundtrip_works() {
@@ -38,5 +39,26 @@ mod tests {
         assert_ne!(hashed, password);
         assert!(verify_password(password, &hashed).expect("verify password"));
         assert!(!verify_password("wrong-password", &hashed).expect("verify wrong password"));
+    }
+
+    #[test]
+    fn empty_password_is_rejected_on_hash() {
+        let error = hash_password("   ").expect_err("空密码应被拒绝");
+        assert!(matches!(error, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn empty_password_is_rejected_on_verify() {
+        let error = verify_password("", "not-a-hash").expect_err("空密码应被拒绝");
+        assert!(matches!(error, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn malformed_hash_is_rejected() {
+        let error = verify_password("S3cure-Password!", "not-a-argon2-hash")
+            .expect_err("无效哈希格式应被拒绝");
+        assert!(
+            matches!(error, AppError::BadRequest(message) if message.contains("密码哈希格式无效"))
+        );
     }
 }
