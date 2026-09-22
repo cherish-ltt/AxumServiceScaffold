@@ -5,6 +5,25 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-09-22
+
+统一响应结构的状态码真值，消除 HTTP 状态码与响应体 `code` 不一致的可能。
+
+### 变更
+
+- `ApiResponse` 内部改为只保存 `StatusCode`，响应体 `code` 在序列化时由状态码派生，
+  HTTP 状态码与 `code` 字段不再可能不一致。
+- 移除 `ApiResponse::with_parts(u16, ...)`，新增 `ApiResponse::with_status(StatusCode, ...)`
+  作为唯一底层构造入口，并新增 `status()` 只读访问器。
+- `ApiResponse` 实现 `IntoResponse`，controller 直接返回 `ApiResponse<T>`，不再手动包裹 `Json`。
+- 移除 `ApiResponse` 的 `Deserialize` 实现（脚手架内无生产调用点）。
+- README 补充「统一响应结构」约定。
+
+### 兼容性
+
+- JSON 响应结构保持不变：`{code, message, data?, timestamp}`，`data` 为空时仍省略该字段。
+- Swagger 文档定义与既有集成测试断言无需调整。
+
 ## [0.1.0] - 2026-09-05
 
 首个正式版本：一个面向 `axum + sea-orm` 的 Rust 空白脚手架，采用 DDD + 洋葱架构组织代码，
