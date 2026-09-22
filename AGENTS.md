@@ -255,4 +255,12 @@ msrv = "1.98.1"
 - 许可证文本分文件存放：`LICENSE-MIT`（MIT 全文）与 `LICENSE-APACHE`（Apache-2.0 全文），不要合并进单个 LICENSE 文件。
 - README 的「许可证」章节需说明双许可及各自文本文件的位置。
 
-```
+### 10.4 统一响应结构
+
+- 所有带响应体的接口统一返回 `ApiResponse<T>`，JSON 结构固定为 `{code, message, data?, timestamp}`，`data` 为空时省略该字段。
+- `code` 由 HTTP 状态码派生，唯一真值是 `ApiResponse` 内部私有的 `status: StatusCode`；禁止引入能独立设置 `code` 的构造入口。
+- 需要非 200 语义时使用 `ApiResponse::with_status(StatusCode, message, data)`，不要新增绕过状态码的构造器。
+- controller 直接返回 `ApiResponse<T>`（已实现 `IntoResponse`），不要再手动包裹 `Json`。
+- `204 No Content` 等不带响应体的状态码不属于 `ApiResponse` 职责，由 handler 直接返回 `StatusCode`。
+- `domain` 层不引入 `http::StatusCode`，错误状态码仍以 `AppError::http_code() -> u16` 表达，在外层 `src/error.rs` 才映射为 `StatusCode`。
+- 修改响应结构时必须同步更新 `README.md` 的「统一响应结构」章节与 `docs/CHANGELOG.md`。
