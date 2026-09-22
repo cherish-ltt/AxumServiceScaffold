@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{Router, extract::State, routing::get};
 
 use crate::{
     api::dto::system::{HealthResponse, WelcomeResponse},
@@ -28,9 +28,9 @@ pub fn router() -> Router<Arc<Container>> {
 ))]
 pub async fn root(
     State(container): State<Arc<Container>>,
-) -> Result<Json<ApiResponse<WelcomeResponse>>, AppError> {
+) -> Result<ApiResponse<WelcomeResponse>, AppError> {
     let welcome = container.system_service.welcome().await?;
-    Ok(Json(ApiResponse::ok(welcome.into())))
+    Ok(ApiResponse::ok(welcome.into()))
 }
 
 #[cfg_attr(debug_assertions, utoipa::path(
@@ -44,19 +44,10 @@ pub async fn root(
 ))]
 pub async fn health(
     State(container): State<Arc<Container>>,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<ApiResponse<HealthResponse>, AppError> {
     let health = container.system_service.health().await?;
-    let response: HealthResponse = health.into();
-    let status = StatusCode::OK;
 
-    Ok((
-        status,
-        Json(ApiResponse::with_parts(
-            status.as_u16(),
-            "健康检查完成",
-            Some(response),
-        )),
-    ))
+    Ok(ApiResponse::ok_with_message("健康检查完成", health.into()))
 }
 
 #[cfg_attr(debug_assertions, utoipa::path(
@@ -68,9 +59,7 @@ pub async fn health(
         (status = 503, description = "服务尚未就绪", body = DocErrorResponse)
     )
 ))]
-pub async fn ready(
-    State(container): State<Arc<Container>>,
-) -> Result<Json<ApiResponse<()>>, AppError> {
+pub async fn ready(State(container): State<Arc<Container>>) -> Result<ApiResponse<()>, AppError> {
     container.system_service.ready().await?;
-    Ok(Json(ApiResponse::message("服务已就绪")))
+    Ok(ApiResponse::message("服务已就绪"))
 }

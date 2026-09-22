@@ -1,5 +1,4 @@
 use axum::{
-    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -25,15 +24,13 @@ impl IntoResponse for AppError {
                 "服务器内部错误".to_string()
             },
         };
-        let body = ApiResponse::<()>::error(status.as_u16(), message);
-        (status, Json(body)).into_response()
+        ApiResponse::<()>::error(status, message).into_response()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::AppError;
-    use crate::response::ApiResponse;
     use axum::body::to_bytes;
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
@@ -61,10 +58,10 @@ mod tests {
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("读取响应体");
-        let body: ApiResponse<()> = serde_json::from_slice(&bytes).expect("解析响应体");
+        let body: serde_json::Value = serde_json::from_slice(&bytes).expect("解析响应体");
 
-        assert_eq!(body.code, 400);
-        assert_eq!(body.message, "请求参数错误: 标题不能为空");
+        assert_eq!(body["code"], 400);
+        assert_eq!(body["message"], "请求参数错误: 标题不能为空");
     }
 
     #[tokio::test]
@@ -80,13 +77,14 @@ mod tests {
             let bytes = to_bytes(response.into_body(), usize::MAX)
                 .await
                 .expect("读取响应体");
-            let body: ApiResponse<()> = serde_json::from_slice(&bytes).expect("解析响应体");
+            let body: serde_json::Value = serde_json::from_slice(&bytes).expect("解析响应体");
+            let message = body["message"].as_str().expect("message 字段为字符串");
 
             assert!(
-                !body.message.contains(&raw_message),
+                !message.contains(&raw_message),
                 "服务端错误不应透出内部信息"
             );
-            assert!(body.data.is_none());
+            assert!(body.get("data").is_none());
         }
     }
 

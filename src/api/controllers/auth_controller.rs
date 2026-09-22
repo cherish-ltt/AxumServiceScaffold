@@ -40,16 +40,16 @@ pub fn router() -> Router<Arc<Container>> {
 pub async fn dev_login(
     State(container): State<Arc<Container>>,
     Json(payload): Json<DevLoginRequest>,
-) -> Result<Json<ApiResponse<AccessTokenResponse>>, AppError> {
+) -> Result<ApiResponse<AccessTokenResponse>, AppError> {
     let token = container
         .auth_service
         .issue_dev_token(payload.into())
         .await?;
 
-    Ok(Json(ApiResponse::ok_with_message(
+    Ok(ApiResponse::ok_with_message(
         "调试令牌签发成功",
         token.into(),
-    )))
+    ))
 }
 
 #[cfg_attr(debug_assertions, utoipa::path(
@@ -64,8 +64,6 @@ pub async fn dev_login(
         (status = 401, description = "未授权或令牌无效", body = DocErrorResponse)
     )
 ))]
-pub async fn me(
-    current_user: CurrentUser,
-) -> Result<Json<ApiResponse<CurrentUserResponse>>, AppError> {
-    Ok(Json(ApiResponse::ok(current_user.into_inner().into())))
+pub async fn me(current_user: CurrentUser) -> Result<ApiResponse<CurrentUserResponse>, AppError> {
+    Ok(ApiResponse::ok(current_user.into_inner().into()))
 }

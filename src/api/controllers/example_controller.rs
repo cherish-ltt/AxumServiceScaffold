@@ -44,16 +44,16 @@ pub fn router() -> Router<Arc<Container>> {
 pub async fn create_echo(
     State(container): State<Arc<Container>>,
     Json(payload): Json<ExampleEchoRequest>,
-) -> Result<Json<ApiResponse<ExampleEchoResponse>>, AppError> {
+) -> Result<ApiResponse<ExampleEchoResponse>, AppError> {
     let echo = container
         .example_service
         .create_echo(payload.into())
         .await?;
 
-    Ok(Json(ApiResponse::ok_with_message(
+    Ok(ApiResponse::ok_with_message(
         "示例对象创建成功",
         echo.into(),
-    )))
+    ))
 }
 
 #[cfg_attr(debug_assertions, utoipa::path(
@@ -68,12 +68,12 @@ pub async fn create_echo(
 pub async fn list_examples(
     State(container): State<Arc<Container>>,
     Query(query): Query<ExampleQuery>,
-) -> Result<Json<ApiResponse<ExampleListResponse>>, AppError> {
+) -> Result<ApiResponse<ExampleListResponse>, AppError> {
     let list = container
         .example_service
         .list_examples(query.into())
         .await?;
-    Ok(Json(ApiResponse::ok(list.into())))
+    Ok(ApiResponse::ok(list.into()))
 }
 
 #[cfg_attr(debug_assertions, utoipa::path(
@@ -96,11 +96,11 @@ pub async fn get_example(
     State(container): State<Arc<Container>>,
     Path(id): Path<String>,
     current_user: CurrentUser,
-) -> Result<Json<ApiResponse<ExampleDetailResponse>>, AppError> {
+) -> Result<ApiResponse<ExampleDetailResponse>, AppError> {
     let detail = container
         .example_service
         .get_example_detail(id, current_user.into_inner())
         .await?;
 
-    Ok(Json(ApiResponse::ok(detail.into())))
+    Ok(ApiResponse::ok(detail.into()))
 }
