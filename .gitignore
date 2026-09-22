@@ -33,3 +33,6 @@ codex-x86_64-pc-windows-msvc.exe
 /log/
 # 符号文件
 *.pdb
+
+# pi
+.pi-dev-output/
