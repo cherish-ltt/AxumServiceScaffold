@@ -5,6 +5,46 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-09-27
+
+内置「启动事务 → 读写数据 → 提交事务」的完整示例：一次转账在一个事务内读账户、
+校验余额、更新双方余额、写流水与审计日志，任一步失败整体回滚。
+
+### 新增
+
+- **事务示例（`services/transaction.rs`）**：`TransferService` 是脚手架内唯一的事务边界，
+  以 `IsolationLevel::Serializable` 开启事务，成功后 `commit`，任一环节失败则 `rollback`，
+  余额更新、流水、审计日志要么一起生效、要么一起消失。
+- **实体与建表**：`entities/transfer_account.rs`、`transfer_record.rs`、`transfer_audit.rs`
+  三个实体；`infrastructure/databases/schema.rs` 负责建表与幂等播种两个演示账户
+  （`acc_alice`、`acc_bob`，各 100000 分）。
+- **仓储适配器（`infrastructure/repositories/transaction.rs`）**：`TransferRepository`
+  的每个方法接收 `C: ConnectionTrait`，传入连接表示不进事务、传入事务即在调用方事务内执行，
+  同一套方法可被事务与普通查询复用。
+- **HTTP 接口**：`POST /api/v1/transactions/dev-transfer`（调试构建专用，可传 `force_fail`）、
+  `GET /api/v1/transactions/{id}`（流水详情与审计日志）、`GET /api/v1/transactions`（分页）。
+- **回滚验证**：调试构建下 `force_fail = true` 会在事务内写入全部完成后主动失败，
+  用于证明回滚确实撤销了已落库的数据；release 构建不注册该路由、DTO 中也没有该字段。
+- **测试**：新增 9 个服务层单测与 8 个 HTTP 集成测试，覆盖提交、余额不足回滚、强制回滚、
+  账户不存在、参数校验、余额溢出、分页与详情查询。
+- **文档**：README 增加「事务示例」章节与完整调用示例；AGENTS.md 增加「事务与持久化规范」。
+
+### 变更
+
+- 金额统一使用最小货币单位的整数（`amount_cents: i64`），领域层与响应中不出现浮点金额，
+  账户表同时维护自增 `version` 用于暴露并发丢失更新。
+- `domain/repositories/mod.rs` 移除空的 `Repository` trait：仓储接口需要引用
+  `sea_orm::ConnectionTrait`，继续放在 `domain` 会破坏「领域层不依赖 sea-orm」的边界，
+  因此仓储接口与实现统一落在 `infrastructure/repositories`。
+- 领域模型与用例接口新增 `domain/models/transaction.rs`、`domain/services/transaction.rs`。
+
+### 兼容性
+
+- 既有 `/api/v1/examples/*`、`/api/v1/system/*`、`/api/v1/auth/*` 接口与统一响应结构均未改动。
+- 启动时会自动创建事务示例的三张表并播种演示账户，对已有 SQLite 数据库是增量且幂等的。
+- 依赖版本提升至 `sea-orm 2.0.3`、`utoipa 6.0.0`、`utoipa-swagger-ui 10.0.1`、
+  `thiserror 2.0.21`、`rand 0.10.3`、`reqwest 0.13.5`、`uuid 1.26.1`。
+
 ## [0.2.0] - 2026-09-22
 
 统一响应结构的状态码真值，消除 HTTP 状态码与响应体 `code` 不一致的可能。
