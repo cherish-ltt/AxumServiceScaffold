@@ -13,4 +13,5 @@ pub fn router() -> Router<Arc<Container>> {
         .merge(controllers::auth_controller::router())
         .merge(controllers::system_controller::router())
         .merge(controllers::example_controller::router())
+        .merge(controllers::transaction_controller::router())
 }

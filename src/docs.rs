@@ -15,11 +15,16 @@ use crate::api::dto::{
         ExampleListResponse, ExampleQuery,
     },
     system::{HealthResponse, WelcomeResponse},
+    transaction::{
+        TransferAuditItem, TransferDetailResponse, TransferListResponse, TransferQuery,
+        TransferReceiptResponse, TransferRecordItem, TransferRequest,
+    },
 };
 
 const SYSTEM_TAG: &str = "System";
 const AUTH_TAG: &str = "Auth";
 const EXAMPLE_TAG: &str = "Example";
+const TRANSACTION_TAG: &str = "Transaction";
 
 struct SecurityAddon;
 
@@ -140,6 +145,39 @@ pub struct DocExampleDetailResponse {
     pub timestamp: i64,
 }
 
+#[derive(Serialize, ToSchema)]
+pub struct DocTransferReceiptResponse {
+    #[schema(example = 200)]
+    pub code: u16,
+    #[schema(example = "转账事务已提交")]
+    pub message: String,
+    pub data: Option<TransferReceiptResponse>,
+    #[schema(example = 1713179523000i64)]
+    pub timestamp: i64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct DocTransferDetailResponse {
+    #[schema(example = 200)]
+    pub code: u16,
+    #[schema(example = "成功")]
+    pub message: String,
+    pub data: Option<TransferDetailResponse>,
+    #[schema(example = 1713179523000i64)]
+    pub timestamp: i64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct DocTransferListResponse {
+    #[schema(example = 200)]
+    pub code: u16,
+    #[schema(example = "成功")]
+    pub message: String,
+    pub data: Option<TransferListResponse>,
+    #[schema(example = 1713179523000i64)]
+    pub timestamp: i64,
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -150,7 +188,10 @@ pub struct DocExampleDetailResponse {
         crate::api::controllers::auth_controller::me,
         crate::api::controllers::example_controller::create_echo,
         crate::api::controllers::example_controller::list_examples,
-        crate::api::controllers::example_controller::get_example
+        crate::api::controllers::example_controller::get_example,
+        crate::api::controllers::transaction_controller::dev_transfer,
+        crate::api::controllers::transaction_controller::get_transfer,
+        crate::api::controllers::transaction_controller::list_transfers
     ),
     components(
         schemas(
@@ -173,14 +214,25 @@ pub struct DocExampleDetailResponse {
             DocCurrentUserResponse,
             DocExampleEchoResponse,
             DocExampleListResponse,
-            DocExampleDetailResponse
+            DocExampleDetailResponse,
+            TransferRequest,
+            TransferReceiptResponse,
+            TransferQuery,
+            TransferRecordItem,
+            TransferAuditItem,
+            TransferDetailResponse,
+            TransferListResponse,
+            DocTransferReceiptResponse,
+            DocTransferDetailResponse,
+            DocTransferListResponse
         )
     ),
     modifiers(&SecurityAddon),
     tags(
         (name = SYSTEM_TAG, description = "系统基础接口"),
         (name = AUTH_TAG, description = "JWT 鉴权接口"),
-        (name = EXAMPLE_TAG, description = "示例业务接口")
+        (name = EXAMPLE_TAG, description = "示例业务接口"),
+        (name = TRANSACTION_TAG, description = "事务与持久化示例接口")
     )
 )]
 struct ApiDoc;
