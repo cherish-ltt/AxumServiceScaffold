@@ -12,7 +12,7 @@ pub struct WelcomeResponse {
     pub service_name: String,
     #[cfg_attr(debug_assertions, schema(example = "development"))]
     pub environment: String,
-    #[cfg_attr(debug_assertions, schema(example = "0.1.0"))]
+    #[cfg_attr(debug_assertions, schema(example = "0.3.0"))]
     pub version: String,
     #[cfg_attr(debug_assertions, schema(example = true))]
     pub docs_enabled: bool,
@@ -36,7 +36,7 @@ pub struct HealthResponse {
     pub service_name: String,
     #[cfg_attr(debug_assertions, schema(example = "development"))]
     pub environment: String,
-    #[cfg_attr(debug_assertions, schema(example = "0.1.0"))]
+    #[cfg_attr(debug_assertions, schema(example = "0.3.0"))]
     pub version: String,
     #[cfg_attr(debug_assertions, schema(example = "ok"))]
     pub status: String,
