@@ -10,6 +10,8 @@ pub enum AppError {
     Unauthorized(String),
     #[error("资源不存在: {0}")]
     NotFound(String),
+    #[error("资源冲突: {0}")]
+    Conflict(String),
     #[error("服务暂不可用: {0}")]
     Unavailable(String),
     #[error("数据库错误: {0}")]
@@ -31,6 +33,10 @@ impl AppError {
         Self::NotFound(message.into())
     }
 
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::Conflict(message.into())
+    }
+
     pub fn unavailable(message: impl Into<String>) -> Self {
         Self::Unavailable(message.into())
     }
@@ -45,6 +51,7 @@ impl AppError {
             Self::BadRequest(_) => 400,
             Self::Unauthorized(_) => 401,
             Self::NotFound(_) => 404,
+            Self::Conflict(_) => 409,
             Self::Unavailable(_) => 503,
         }
     }
@@ -58,6 +65,11 @@ impl From<anyhow::Error> for AppError {
 
 impl From<sea_orm::DbErr> for AppError {
     fn from(error: sea_orm::DbErr) -> Self {
+        // 唯一约束冲突属于客户端可控冲突（如幂等键重复提交），映射为 409 而非 500。
+        if let Some(sea_orm::SqlErr::UniqueConstraintViolation(detail)) = error.sql_err() {
+            return Self::Conflict(detail);
+        }
+
         Self::Database(error.to_string())
     }
 }
@@ -77,6 +89,7 @@ mod tests {
             AppError::Unauthorized(_)
         ));
         assert!(matches!(AppError::not_found("x"), AppError::NotFound(_)));
+        assert!(matches!(AppError::conflict("x"), AppError::Conflict(_)));
         assert!(matches!(
             AppError::unavailable("x"),
             AppError::Unavailable(_)
@@ -89,6 +102,7 @@ mod tests {
         assert_eq!(AppError::bad_request("x").http_code(), 400);
         assert_eq!(AppError::unauthorized("x").http_code(), 401);
         assert_eq!(AppError::not_found("x").http_code(), 404);
+        assert_eq!(AppError::conflict("x").http_code(), 409);
         assert_eq!(AppError::unavailable("x").http_code(), 503);
         assert_eq!(AppError::internal("x").http_code(), 500);
         assert_eq!(AppError::Config("x".to_string()).http_code(), 500);
@@ -108,6 +122,10 @@ mod tests {
         assert_eq!(
             AppError::not_found("example_001").to_string(),
             "资源不存在: example_001"
+        );
+        assert_eq!(
+            AppError::conflict("幂等键重复").to_string(),
+            "资源冲突: 幂等键重复"
         );
         assert_eq!(
             AppError::unavailable("数据库未就绪").to_string(),
@@ -137,5 +155,50 @@ mod tests {
     fn db_error_converts_to_database() {
         let error: AppError = sea_orm::DbErr::Custom("连接失败".to_string()).into();
         assert!(matches!(error, AppError::Database(message) if message.contains("连接失败")));
+    }
+
+    /// 真实触发数据库唯一约束，确认被识别为 409 冲突而不是 500。
+    #[tokio::test]
+    async fn unique_constraint_violation_maps_to_conflict() {
+        use sea_orm::{ConnectionTrait, Database};
+
+        let url = format!(
+            "sqlite://{}?mode=rwc",
+            std::env::temp_dir()
+                .join(format!(
+                    "axum-scaffold-error-test-{}.db",
+                    uuid::Uuid::now_v7()
+                ))
+                .display()
+        );
+        let database = Database::connect(url).await.expect("连接临时数据库");
+
+        database
+            .execute_unprepared(
+                "CREATE TABLE demo (id TEXT PRIMARY KEY NOT NULL, request_id TEXT, \
+                 CONSTRAINT demo_request_id_unique UNIQUE (request_id))",
+            )
+            .await
+            .expect("建表成功");
+        database
+            .execute_unprepared("INSERT INTO demo (id, request_id) VALUES ('a', 'dup')")
+            .await
+            .expect("首次写入成功");
+
+        let db_error = database
+            .execute_unprepared("INSERT INTO demo (id, request_id) VALUES ('b', 'dup')")
+            .await
+            .expect_err("重复幂等键必须被拒绝");
+
+        let error: AppError = db_error.into();
+        assert!(
+            matches!(error, AppError::Conflict(_)),
+            "唯一约束冲突应映射为 Conflict，实际: {error:?}"
+        );
+        assert_eq!(error.http_code(), 409);
+        assert!(
+            error.to_string().contains("UNIQUE constraint failed"),
+            "冲突信息应保留数据库原因，便于排查: {error}"
+        );
     }
 }

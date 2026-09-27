@@ -137,15 +137,13 @@ async fn transfer_in_transaction<R: TransferRepository>(
         .update_account_balance(transaction, &to_after)
         .await?;
 
-    let created_at = Local::now().timestamp_millis();
-    let record_id = Uuid::now_v7().to_string();
-    let record = build_record(
-        record_id.clone(),
-        command,
-        &from_after,
-        &to_after,
-        created_at,
-    );
+    let identity = RecordIdentity {
+        record_id: Uuid::now_v7().to_string(),
+        request_id: command.request_id.clone(),
+        created_at: Local::now().timestamp_millis(),
+    };
+    let record = build_record(&identity, command, &from_after, &to_after);
+    // 幂等键冲突会在这里返回唯一约束错误，由本函数的上层回滚整个事务。
     repository.insert_record(transaction, &record).await?;
 
     let changes = BalanceChanges {
@@ -154,14 +152,14 @@ async fn transfer_in_transaction<R: TransferRepository>(
         to_before: &to,
         to_after: &to_after,
     };
-    let mut audits = balance_audits(&record_id, &changes, created_at);
+    let mut audits = balance_audits(&identity, &changes);
     if command.force_fail {
         // 写完全部数据后再失败，用来证明回滚确实撤销了已写入的内容。
         audits.push(build_audit(
-            &record_id,
+            &identity.record_id,
             audit_action::ROLLBACK_VERIFIED,
             "调试开关触发：事务内写入将全部回滚",
-            created_at,
+            identity.created_at,
         ));
     }
 
@@ -176,14 +174,15 @@ async fn transfer_in_transaction<R: TransferRepository>(
     }
 
     Ok(TransferReceipt {
-        record_id,
+        record_id: identity.record_id,
+        request_id: identity.request_id,
         from_account_id: command.from_account_id.clone(),
         to_account_id: command.to_account_id.clone(),
         amount_cents: command.amount_cents,
         from_balance_after_cents: from_after.balance_cents,
         to_balance_after_cents: to_after.balance_cents,
         remark: command.remark.clone(),
-        created_at,
+        created_at: identity.created_at,
         committed: true,
         rolled_back: false,
     })
@@ -251,22 +250,29 @@ fn credit(
     })
 }
 
-fn build_record(
+/// 一次事务写入的身份信息：主键、幂等键与时间戳。
+struct RecordIdentity {
     record_id: String,
+    request_id: Option<String>,
+    created_at: i64,
+}
+
+fn build_record(
+    identity: &RecordIdentity,
     command: &TransferCommand,
     from_after: &TransferAccountState,
     to_after: &TransferAccountState,
-    created_at: i64,
 ) -> NewTransferRecord {
     NewTransferRecord {
-        id: record_id,
+        id: identity.record_id.clone(),
+        request_id: identity.request_id.clone(),
         from_account_id: command.from_account_id.clone(),
         to_account_id: command.to_account_id.clone(),
         amount_cents: command.amount_cents,
         from_balance_after_cents: from_after.balance_cents,
         to_balance_after_cents: to_after.balance_cents,
         remark: command.remark.clone(),
-        created_at,
+        created_at: identity.created_at,
     }
 }
 
@@ -280,22 +286,21 @@ struct BalanceChanges<'a> {
 
 /// 一次事务内的两条审计记录：余额变更与流水创建。
 fn balance_audits(
-    record_id: &str,
+    identity: &RecordIdentity,
     changes: &BalanceChanges<'_>,
-    created_at: i64,
 ) -> Vec<NewTransferAudit> {
     vec![
         build_audit(
-            record_id,
+            &identity.record_id,
             audit_action::BALANCE_UPDATED,
             balance_detail(changes),
-            created_at,
+            identity.created_at,
         ),
         build_audit(
-            record_id,
+            &identity.record_id,
             audit_action::RECORD_CREATED,
             "转账流水写入完成",
-            created_at,
+            identity.created_at,
         ),
     ]
 }
@@ -362,6 +367,9 @@ mod tests {
         schema::create_transfer_tables(&database)
             .await
             .expect("建表成功");
+        schema::create_transfer_indexes(&database)
+            .await
+            .expect("建索引成功");
         schema::seed_transfer_accounts(&database)
             .await
             .expect("播种成功");
@@ -378,6 +386,7 @@ mod tests {
             to_account_id: to.to_string(),
             amount_cents,
             remark: Some("单测转账".to_string()),
+            request_id: None,
             force_fail: false,
         }
     }
@@ -466,6 +475,36 @@ mod tests {
         assert_eq!(balance(&database, BOB).await, SEED_BALANCE);
         assert_eq!(account_version(&database, ALICE).await, 0);
         assert_eq!(record_count(&database).await, 0);
+    }
+
+    /// 跨表写入过程中命中唯一约束：账户余额更新、流水、审计全部回滚。
+    #[tokio::test]
+    async fn duplicate_request_id_rolls_back_every_table() {
+        let (service, database) = setup().await;
+
+        let mut first = command(ALICE, BOB, 20000);
+        first.request_id = Some("req-dup-001".to_string());
+        let committed = service.transfer(first).await.expect("首次提交成功");
+        assert_eq!(committed.request_id.as_deref(), Some("req-dup-001"));
+        assert_eq!(balance(&database, ALICE).await, 80000);
+        assert_eq!(balance(&database, BOB).await, 120000);
+        assert_eq!(record_count(&database).await, 1);
+
+        let mut duplicate = command(ALICE, BOB, 5000);
+        duplicate.request_id = Some("req-dup-001".to_string());
+        let error = service
+            .transfer(duplicate)
+            .await
+            .expect_err("重复幂等键必须失败");
+
+        assert!(
+            matches!(error, AppError::Conflict(_)),
+            "唯一约束冲突应映射为 409 冲突，实际: {error:?}"
+        );
+        // 第二次的余额更新与写入全部被回滚，只剩首次提交的结果。
+        assert_eq!(balance(&database, ALICE).await, 80000);
+        assert_eq!(balance(&database, BOB).await, 120000);
+        assert_eq!(record_count(&database).await, 1);
     }
 
     #[tokio::test]

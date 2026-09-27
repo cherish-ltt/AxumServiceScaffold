@@ -12,9 +12,10 @@ impl IntoResponse for AppError {
         let status =
             StatusCode::from_u16(self.http_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
         let message = match status {
-            StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED | StatusCode::NOT_FOUND => {
-                self.to_string()
-            },
+            StatusCode::BAD_REQUEST
+            | StatusCode::UNAUTHORIZED
+            | StatusCode::NOT_FOUND
+            | StatusCode::CONFLICT => self.to_string(),
             StatusCode::SERVICE_UNAVAILABLE => {
                 error!(error = %self, "服务不可用");
                 "服务暂不可用".to_string()
@@ -41,6 +42,7 @@ mod tests {
             (AppError::bad_request("参数错误"), 400),
             (AppError::unauthorized("未授权"), 401),
             (AppError::not_found("资源不存在"), 404),
+            (AppError::conflict("幂等键重复"), 409),
             (AppError::unavailable("数据库未就绪"), 503),
             (AppError::internal("意外失败"), 500),
             (AppError::Config("配置缺失".to_string()), 500),

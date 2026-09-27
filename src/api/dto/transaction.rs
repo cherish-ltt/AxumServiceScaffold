@@ -22,6 +22,9 @@ pub struct TransferRequest {
     pub amount_cents: i64,
     #[cfg_attr(debug_assertions, schema(example = "示例转账"))]
     pub remark: Option<String>,
+    /// 幂等键：同一个键重复提交会触发唯一约束冲突并回滚整个事务。
+    #[cfg_attr(debug_assertions, schema(example = "req-20260927-0001"))]
+    pub request_id: Option<String>,
     /// 调试构建专用：在事务内写入全部完成后主动失败，用于验证回滚。
     ///
     /// 接口本身只在调试构建注册，release 构建下该字段与路由都不存在。
@@ -37,6 +40,7 @@ impl From<TransferRequest> for TransferCommand {
             to_account_id: value.to_account_id,
             amount_cents: value.amount_cents,
             remark: value.remark,
+            request_id: value.request_id,
             #[cfg(debug_assertions)]
             force_fail: value.force_fail.unwrap_or(false),
             #[cfg(not(debug_assertions))]
@@ -53,6 +57,8 @@ pub struct TransferReceiptResponse {
         schema(example = "019680cc-7e1c-7ec0-b7b8-4b4f8e9dff10")
     )]
     pub record_id: String,
+    #[cfg_attr(debug_assertions, schema(example = "req-20260927-0001"))]
+    pub request_id: Option<String>,
     #[cfg_attr(debug_assertions, schema(example = "acc_alice"))]
     pub from_account_id: String,
     #[cfg_attr(debug_assertions, schema(example = "acc_bob"))]
@@ -77,6 +83,7 @@ impl From<TransferReceipt> for TransferReceiptResponse {
     fn from(value: TransferReceipt) -> Self {
         Self {
             record_id: value.record_id,
+            request_id: value.request_id,
             from_account_id: value.from_account_id,
             to_account_id: value.to_account_id,
             amount_cents: value.amount_cents,
@@ -98,6 +105,8 @@ pub struct TransferRecordItem {
         schema(example = "019680cc-7e1c-7ec0-b7b8-4b4f8e9dff10")
     )]
     pub record_id: String,
+    #[cfg_attr(debug_assertions, schema(example = "req-20260927-0001"))]
+    pub request_id: Option<String>,
     #[cfg_attr(debug_assertions, schema(example = "acc_alice"))]
     pub from_account_id: String,
     #[cfg_attr(debug_assertions, schema(example = "acc_bob"))]
@@ -118,6 +127,7 @@ impl From<TransferRecordView> for TransferRecordItem {
     fn from(value: TransferRecordView) -> Self {
         Self {
             record_id: value.record_id,
+            request_id: value.request_id,
             from_account_id: value.from_account_id,
             to_account_id: value.to_account_id,
             amount_cents: value.amount_cents,

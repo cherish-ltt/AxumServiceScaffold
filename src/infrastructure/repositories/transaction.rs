@@ -122,6 +122,7 @@ impl TransferRepository for SeaOrmTransferRepository {
     {
         let active = transfer_record::ActiveModel {
             id: Set(record.id.clone()),
+            request_id: Set(record.request_id.clone()),
             from_account_id: Set(record.from_account_id.clone()),
             to_account_id: Set(record.to_account_id.clone()),
             amount_cents: Set(record.amount_cents),
@@ -227,6 +228,7 @@ impl From<transfer_record::Model> for TransferRecordView {
     fn from(model: transfer_record::Model) -> Self {
         Self {
             record_id: model.id,
+            request_id: model.request_id,
             from_account_id: model.from_account_id,
             to_account_id: model.to_account_id,
             amount_cents: model.amount_cents,

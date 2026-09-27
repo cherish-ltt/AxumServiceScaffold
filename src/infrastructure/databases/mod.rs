@@ -44,6 +44,7 @@ pub async fn run_migrations(database: &DatabaseConnection) -> Result<()> {
         .context("创建数据库迁移表失败")?;
 
     schema::create_transfer_tables(database).await?;
+    schema::create_transfer_indexes(database).await?;
     schema::seed_transfer_accounts(database).await?;
 
     Ok(())

@@ -1,22 +1,72 @@
 use anyhow::{Context, Result};
-use sea_orm::{ConnectionTrait, DatabaseConnection};
+use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 
-/// 创建事务示例所需的表。
+/// 建表。
 ///
 /// 语句保持 SQLite / MySQL / PostgreSQL 通用；列名与 `src/entities` 中的实体一一对应。
+/// 全新克隆仓库后无需任何手工步骤，启动或跑测试时会自动建表并播种演示账户。
 pub async fn create_transfer_tables(database: &DatabaseConnection) -> Result<()> {
-    for statement in [
-        ACCOUNT_TABLE,
-        RECORD_TABLE,
-        AUDIT_TABLE,
-        RECORD_INDEX,
-        AUDIT_INDEX,
-    ] {
+    for statement in [ACCOUNT_TABLE, RECORD_TABLE, AUDIT_TABLE] {
         database
             .execute_unprepared(statement)
             .await
             .context("创建事务示例表失败")?;
     }
+
+    Ok(())
+}
+
+/// 补齐历史库缺列，再建索引。
+///
+/// 顺序不能颠倒：`request_id` 列必须先存在，才能建幂等键唯一索引。
+pub async fn create_transfer_indexes(database: &DatabaseConnection) -> Result<()> {
+    apply_pending_migrations(database).await?;
+
+    for statement in [RECORD_INDEX, RECORD_REQUEST_ID_INDEX, AUDIT_INDEX] {
+        database
+            .execute_unprepared(statement)
+            .await
+            .context("创建事务示例索引失败")?;
+    }
+
+    Ok(())
+}
+
+/// 首次启动时写入两个演示账户，重复启动不会重复插入。
+///
+/// 使用 `NOT EXISTS` 而不是先查后写，让播种本身也是幂等且原子的。
+/// 每个语句单独执行，避免依赖驱动的多语句支持。
+pub async fn seed_transfer_accounts(database: &DatabaseConnection) -> Result<()> {
+    for statement in [SEED_ALICE, SEED_BOB] {
+        database
+            .execute_unprepared(statement)
+            .await
+            .context("写入事务示例种子账户失败")?;
+    }
+
+    Ok(())
+}
+
+/// 为老版本数据库补 `transfer_records.request_id` 列。
+///
+/// 列已存在时返回空语句，因此本函数可重复执行。
+pub async fn apply_pending_migrations(database: &DatabaseConnection) -> Result<()> {
+    let statement = Statement::from_string(DbBackend::Sqlite, CHECK_RECORD_REQUEST_ID.to_string());
+    let row = database
+        .query_one_raw(statement)
+        .await
+        .context("检查 transfer_records.request_id 列失败")?
+        .ok_or_else(|| anyhow::anyhow!("检查 transfer_records.request_id 列未返回结果"))?;
+    let migration: String = row.try_get("", "migration").context("读取迁移语句失败")?;
+
+    if migration.is_empty() {
+        return Ok(());
+    }
+
+    database
+        .execute_unprepared(&migration)
+        .await
+        .context("补齐 transfer_records.request_id 列失败")?;
 
     Ok(())
 }
@@ -30,6 +80,7 @@ const ACCOUNT_TABLE: &str = "CREATE TABLE IF NOT EXISTS transfer_accounts (\
 
 const RECORD_TABLE: &str = "CREATE TABLE IF NOT EXISTS transfer_records (\
      id TEXT PRIMARY KEY NOT NULL, \
+     request_id TEXT, \
      from_account_id TEXT NOT NULL, \
      to_account_id TEXT NOT NULL, \
      amount_cents BIGINT NOT NULL, \
@@ -48,8 +99,26 @@ const AUDIT_TABLE: &str = "CREATE TABLE IF NOT EXISTS transfer_audits (\
 const RECORD_INDEX: &str =
     "CREATE INDEX IF NOT EXISTS idx_transfer_records_created_at ON transfer_records (created_at)";
 
+/// 幂等键唯一索引。
+///
+/// SQLite / MySQL / PostgreSQL 的唯一索引都允许多个 NULL，因此历史流水的空 `request_id`
+/// 不会互相冲突，补列后可以直接建索引。
+const RECORD_REQUEST_ID_INDEX: &str = "CREATE UNIQUE INDEX IF NOT EXISTS \
+     idx_transfer_records_request_id ON transfer_records (request_id)";
+
 const AUDIT_INDEX: &str =
     "CREATE INDEX IF NOT EXISTS idx_transfer_audits_record_id ON transfer_audits (record_id)";
+
+/// 判断老库是否需要补列，需要时直接返回 ALTER 语句。
+///
+/// SQLite 不支持 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`，先用 `pragma_table_info`
+/// 判断列是否存在；表不存在时返回空语句，因为随后执行的建表语句会带上该列。
+/// 换 MySQL / PostgreSQL 部署时，这里需要替换为对应的迁移工具。
+const CHECK_RECORD_REQUEST_ID: &str = "SELECT CASE \
+     WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'transfer_records') \
+       AND NOT EXISTS (SELECT 1 FROM pragma_table_info('transfer_records') WHERE name = 'request_id') \
+     THEN 'ALTER TABLE transfer_records ADD COLUMN request_id TEXT' \
+     ELSE '' END AS migration";
 
 const SEED_ALICE: &str = "INSERT INTO transfer_accounts (id, owner, balance_cents, version, updated_at) \
      SELECT 'acc_alice', 'Alice', 100000, 0, 0 \
@@ -59,27 +128,15 @@ const SEED_BOB: &str = "INSERT INTO transfer_accounts (id, owner, balance_cents,
      SELECT 'acc_bob', 'Bob', 100000, 0, 0 \
      WHERE NOT EXISTS (SELECT 1 FROM transfer_accounts WHERE id = 'acc_bob')";
 
-/// 首次启动时写入两个演示账户，重复启动不会重复插入。
-///
-/// 使用 `NOT EXISTS` 而不是先查后写，让播种本身也是幂等且原子的。
-/// 每个语句单独执行，避免依赖驱动的多语句支持。
-pub async fn seed_transfer_accounts(database: &DatabaseConnection) -> Result<()> {
-    for statement in [SEED_ALICE, SEED_BOB] {
-        database
-            .execute_unprepared(statement)
-            .await
-            .context("写入事务示例种子账户失败")?;
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use sea_orm::{Database, DatabaseConnection, EntityTrait};
+    use sea_orm::{ConnectionTrait, Database, DatabaseConnection, EntityTrait};
     use uuid::Uuid;
 
-    use super::{create_transfer_tables, seed_transfer_accounts};
+    use super::{
+        apply_pending_migrations, create_transfer_indexes, create_transfer_tables,
+        seed_transfer_accounts,
+    };
     use crate::entities::{transfer_account, transfer_audit, transfer_record};
 
     async fn setup_database() -> DatabaseConnection {
@@ -93,19 +150,20 @@ mod tests {
         Database::connect(url).await.expect("连接临时数据库")
     }
 
+    /// 建表 + 索引 + 播种，可重复执行。
+    async fn bootstrap(database: &DatabaseConnection) {
+        create_transfer_tables(database).await.expect("建表成功");
+        create_transfer_indexes(database).await.expect("建索引成功");
+        seed_transfer_accounts(database).await.expect("播种成功");
+    }
+
     #[tokio::test]
     async fn tables_and_seed_are_created_once() {
         let database = setup_database().await;
 
-        create_transfer_tables(&database).await.expect("建表成功");
-        seed_transfer_accounts(&database).await.expect("播种成功");
+        bootstrap(&database).await;
         // 重复执行验证幂等性：再次启动服务不应产生重复账户或建表错误。
-        create_transfer_tables(&database)
-            .await
-            .expect("重复建表成功");
-        seed_transfer_accounts(&database)
-            .await
-            .expect("重复播种成功");
+        bootstrap(&database).await;
 
         let accounts = transfer_account::Entity::find()
             .all(&database)
@@ -136,5 +194,69 @@ mod tests {
             .await
             .expect("查询审计日志");
         assert!(audits.is_empty());
+    }
+
+    /// 老库（无 request_id 列）启动后应自动补列并建好唯一索引。
+    #[tokio::test]
+    async fn legacy_database_gets_request_id_column_and_unique_index() {
+        let database = setup_database().await;
+
+        database
+            .execute_unprepared(
+                "CREATE TABLE transfer_records (\
+                 id TEXT PRIMARY KEY NOT NULL, \
+                 from_account_id TEXT NOT NULL, \
+                 to_account_id TEXT NOT NULL, \
+                 amount_cents BIGINT NOT NULL, \
+                 from_balance_after_cents BIGINT NOT NULL, \
+                 to_balance_after_cents BIGINT NOT NULL, \
+                 remark TEXT, \
+                 created_at BIGINT NOT NULL)",
+            )
+            .await
+            .expect("创建老版本表结构");
+        database
+            .execute_unprepared(
+                "INSERT INTO transfer_records (id, from_account_id, to_account_id, amount_cents, \
+                 from_balance_after_cents, to_balance_after_cents, remark, created_at) \
+                 VALUES ('legacy', 'acc_alice', 'acc_bob', 1, 1, 1, NULL, 0)",
+            )
+            .await
+            .expect("写入历史流水");
+
+        apply_pending_migrations(&database).await.expect("补列成功");
+        // 重复执行不应报错。
+        apply_pending_migrations(&database)
+            .await
+            .expect("重复补列成功");
+
+        let legacy = transfer_record::Entity::find_by_id("legacy".to_string())
+            .one(&database)
+            .await
+            .expect("查询历史流水")
+            .expect("历史流水存在");
+        assert!(legacy.request_id.is_none());
+
+        // 真实启动流程：建表（老表已存在会被跳过）→ 补列建索引。
+        create_transfer_tables(&database).await.expect("建表成功");
+        create_transfer_indexes(&database)
+            .await
+            .expect("建索引成功");
+
+        // 唯一索引生效：同一 request_id 再次写入必然失败。
+        database
+            .execute_unprepared(
+                "UPDATE transfer_records SET request_id = 'dup' WHERE id = 'legacy'",
+            )
+            .await
+            .expect("写入幂等键");
+        let conflict = database
+            .execute_unprepared(
+                "INSERT INTO transfer_records (id, request_id, from_account_id, to_account_id, \
+                 amount_cents, from_balance_after_cents, to_balance_after_cents, remark, created_at) \
+                 VALUES ('other', 'dup', 'acc_alice', 'acc_bob', 1, 1, 1, NULL, 0)",
+            )
+            .await;
+        assert!(conflict.is_err(), "重复幂等键应当被唯一索引拒绝");
     }
 }

@@ -10,6 +10,9 @@ pub struct TransferCommand {
     pub to_account_id: String,
     pub amount_cents: i64,
     pub remark: Option<String>,
+    /// 幂等键：同一键重复提交会命中 `transfer_records.request_id` 的唯一约束，
+    /// 事务整体回滚，用于演示「跨表写入中约束冲突 → 全部撤销」。
+    pub request_id: Option<String>,
     /// 事务内写入全部完成后主动失败，用于验证回滚。
     ///
     /// 仅调试构建可以从 HTTP 传入（见 `api/dto/transaction.rs`），
@@ -30,6 +33,7 @@ pub struct TransferAccountState {
 #[derive(Debug, Clone)]
 pub struct TransferReceipt {
     pub record_id: String,
+    pub request_id: Option<String>,
     pub from_account_id: String,
     pub to_account_id: String,
     pub amount_cents: i64,
@@ -47,6 +51,7 @@ pub struct TransferReceipt {
 #[derive(Debug, Clone)]
 pub struct TransferRecordView {
     pub record_id: String,
+    pub request_id: Option<String>,
     pub from_account_id: String,
     pub to_account_id: String,
     pub amount_cents: i64,
@@ -84,6 +89,7 @@ pub struct TransferRecordPage {
 #[derive(Debug, Clone)]
 pub struct NewTransferRecord {
     pub id: String,
+    pub request_id: Option<String>,
     pub from_account_id: String,
     pub to_account_id: String,
     pub amount_cents: i64,
