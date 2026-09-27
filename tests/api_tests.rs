@@ -102,6 +102,16 @@ fn post_json(uri: &str, body: Value) -> Request<Body> {
         .expect("构造 POST 请求")
 }
 
+fn post_json_with_bearer(uri: &str, token: &str, body: Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .body(Body::from(body.to_string()))
+        .expect("构造带令牌的 POST 请求")
+}
+
 /// 通过调试登录接口获取访问令牌。
 async fn issue_dev_token(app: &Router) -> String {
     let (status, body) = send(
@@ -394,12 +404,196 @@ async fn openapi_document_is_served() {
             .map(|paths| !paths.is_empty())
             .unwrap_or(false)
     );
+
+    // 事务示例的三个接口都应当出现在 OpenAPI 文档里。
+    let paths = body["paths"].as_object().expect("paths 对象");
+    for path in [
+        "/api/v1/transactions",
+        "/api/v1/transactions/{id}",
+        "/api/v1/transactions/dev-transfer",
+    ] {
+        assert!(paths.contains_key(path), "OpenAPI 缺少路径: {path}");
+    }
+    let tags = body["tags"].as_array().expect("tags 数组");
+    assert!(
+        tags.iter()
+            .any(|tag| tag["name"] == "Transaction" && tag.get("description").is_some()),
+        "OpenAPI 缺少 Transaction 标签"
+    );
 }
 
 #[tokio::test]
 async fn unknown_route_returns_404() {
     let app = setup_app().await;
     let (status, _) = send(app, get("/api/v1/unknown")).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+const DEV_TRANSFER: &str = "/api/v1/transactions/dev-transfer";
+
+fn transfer_body(amount_cents: i64) -> Value {
+    json!({
+        "from_account_id": "acc_alice",
+        "to_account_id": "acc_bob",
+        "amount_cents": amount_cents,
+        "remark": "集成测试转账",
+    })
+}
+
+/// 同一事务写入的余额、流水与审计日志，提交后应当全部可见。
+#[tokio::test]
+async fn transfer_commits_balances_record_and_audits() {
+    let app = setup_app().await;
+    let token = issue_dev_token(&app).await;
+
+    let (status, body) = send(
+        app.clone(),
+        post_json_with_bearer(DEV_TRANSFER, &token, transfer_body(25000)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["message"], "转账事务已提交");
+    assert_eq!(body["data"]["amount_cents"], 25000);
+    assert_eq!(body["data"]["from_balance_after_cents"], 75000);
+    assert_eq!(body["data"]["to_balance_after_cents"], 125000);
+    assert_eq!(body["data"]["committed"], true);
+    assert_eq!(body["data"]["rolled_back"], false);
+
+    let record_id = body["data"]["record_id"].as_str().expect("返回流水 ID");
+    let (status, detail) = send(
+        app.clone(),
+        get_with_bearer(&format!("/api/v1/transactions/{record_id}"), &token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["data"]["record"]["amount_cents"], 25000);
+    let audits = detail["data"]["audits"].as_array().expect("审计日志数组");
+    assert_eq!(audits.len(), 2);
+    assert_eq!(audits[0]["action"], "BALANCE_UPDATED");
+    assert_eq!(audits[1]["action"], "RECORD_CREATED");
+}
+
+#[tokio::test]
+async fn transfer_requires_bearer_token() {
+    let app = setup_app().await;
+
+    let (status, _) = send(app, post_json(DEV_TRANSFER, transfer_body(1000))).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn transfer_rejects_insufficient_balance_without_writing() {
+    let app = setup_app().await;
+    let token = issue_dev_token(&app).await;
+
+    let (status, body) = send(
+        app.clone(),
+        post_json_with_bearer(DEV_TRANSFER, &token, transfer_body(100001)),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.get("data").is_none());
+
+    let (status, list) = send(app, get_with_bearer("/api/v1/transactions", &token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["data"]["total"], 0);
+}
+
+#[tokio::test]
+async fn transfer_rejects_unknown_account_with_404() {
+    let app = setup_app().await;
+    let token = issue_dev_token(&app).await;
+
+    let mut payload = transfer_body(1000);
+    payload["to_account_id"] = json!("acc_missing");
+    let (status, _) = send(app, post_json_with_bearer(DEV_TRANSFER, &token, payload)).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// 调试开关：事务内写入全部完成后强制失败，回滚必须让数据库回到原状。
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn transfer_rolls_back_every_write_when_force_fail_is_on() {
+    let app = setup_app().await;
+    let token = issue_dev_token(&app).await;
+
+    let mut payload = transfer_body(30000);
+    payload["force_fail"] = json!(true);
+    let (status, body) = send(
+        app.clone(),
+        post_json_with_bearer(DEV_TRANSFER, &token, payload),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body["message"], "服务器内部错误");
+
+    // 回滚后流水分页应为空，说明已写入的账户、流水、审计都被撤销。
+    let (status, list) = send(app.clone(), get_with_bearer("/api/v1/transactions", &token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["data"]["total"], 0);
+
+    // 用一次正常转账反证余额仍为初始值：100000 - 20000 = 80000。
+    let (status, body) = send(
+        app,
+        post_json_with_bearer(DEV_TRANSFER, &token, transfer_body(20000)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["from_balance_after_cents"], 80000);
+}
+
+#[tokio::test]
+async fn transfer_list_paginates_and_rejects_bad_paging() {
+    let app = setup_app().await;
+    let token = issue_dev_token(&app).await;
+
+    for amount in [1000, 2000] {
+        let (status, _) = send(
+            app.clone(),
+            post_json_with_bearer(DEV_TRANSFER, &token, transfer_body(amount)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    let (status, body) = send(
+        app.clone(),
+        get_with_bearer("/api/v1/transactions?page=1&size=1", &token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["total"], 2);
+    assert_eq!(body["data"]["items"].as_array().map(Vec::len), Some(1));
+    assert_eq!(body["data"]["items"][0]["amount_cents"], 2000);
+
+    let (status, _) = send(
+        app.clone(),
+        get_with_bearer("/api/v1/transactions?size=101", &token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, _) = send(app, get_with_bearer("/api/v1/transactions?page=0", &token)).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unknown_transfer_record_returns_404() {
+    let app = setup_app().await;
+    let token = issue_dev_token(&app).await;
+
+    let (status, _) = send(
+        app,
+        get_with_bearer("/api/v1/transactions/missing-record", &token),
+    )
+    .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
