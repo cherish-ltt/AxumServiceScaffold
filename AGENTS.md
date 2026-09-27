@@ -277,4 +277,6 @@ msrv = "1.98.1"
 - 需要并发控制的表维护自增 `version` 列，更新时一并自增，不做静默覆盖。
 - 新增实体放在 `src/entities` 下独立文件，并在 `infrastructure/databases/schema.rs` 补对应的 `CREATE TABLE`；种子数据必须幂等（`NOT EXISTS` 或等价写法）。
 - 每个事务用例至少覆盖「提交成功」与「中途失败回滚后数据无残留」两类测试，回滚测试需断言失败前状态未被改变。
+- 唯一约束冲突属于客户端可控冲突，在 `From<DbErr>` 中统一映射为 `AppError::Conflict`（409）并透出可读原因，不得当作 500 处理；幂等键一类业务唯一列必须建唯一索引，不能只靠先查后写。
+- 数据库文件不得入库（`.gitignore` 排除）：建表、索引与种子数据必须由启动流程自动完成且幂等，表结构变更需同时提供老库的自动补齐路径。
 - 参考实现：`src/services/transaction.rs`、`src/infrastructure/repositories/transaction.rs`。
