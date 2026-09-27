@@ -82,11 +82,13 @@ src
 │  ├─ controllers
 │  │  ├─ auth_controller.rs
 │  │  ├─ example_controller.rs
-│  │  └─ system_controller.rs
+│  │  ├─ system_controller.rs
+│  │  └─ transaction_controller.rs
 │  ├─ dto
 │  │  ├─ auth.rs
 │  │  ├─ example.rs
-│  │  └─ system.rs
+│  │  ├─ system.rs
+│  │  └─ transaction.rs
 │  ├─ extractors
 │  │  └─ current_user.rs
 │  └─ mod.rs
@@ -94,20 +96,29 @@ src
 │  ├─ models
 │  │  ├─ auth.rs
 │  │  ├─ example.rs
-│  │  └─ system.rs
+│  │  ├─ system.rs
+│  │  └─ transaction.rs
 │  ├─ services
 │  │  ├─ auth.rs
 │  │  ├─ example.rs
-│  │  └─ system.rs
+│  │  ├─ system.rs
+│  │  └─ transaction.rs
 │  ├─ constants.rs
 │  ├─ error.rs
 │  └─ repositories
-│     └─ mod.rs
+│     └─ mod.rs            # 仅说明边界，仓储接口在 infrastructure
+├─ entities
+│  ├─ transfer_account.rs
+│  ├─ transfer_audit.rs
+│  ├─ transfer_record.rs
+│  └─ mod.rs
 ├─ infrastructure
 │  ├─ databases
-│  │  └─ mod.rs
+│  │  ├─ mod.rs
+│  │  └─ schema.rs         # 建表与幂等种子数据
 │  ├─ repositories
-│  │  └─ mod.rs
+│  │  ├─ mod.rs
+│  │  └─ transaction.rs    # 转账仓储接口 + SeaORM 实现
 │  ├─ services
 │  │  └─ jwt.rs
 │  ├─ config.rs
@@ -115,14 +126,13 @@ src
 ├─ services
 │  ├─ auth.rs
 │  ├─ example.rs
-│  └─ system.rs
+│  ├─ system.rs
+│  └─ transaction.rs       # 事务边界所在层
 ├─ util
 │  └─ password.rs
 ├─ container.rs
 ├─ create_app.rs
 ├─ docs.rs
-├─ entities
-│  └─ mod.rs
 ├─ error.rs
 ├─ lib.rs
 ├─ logging.rs
@@ -152,6 +162,7 @@ src
 - 调用领域接口
 - 调用基础设施能力
 - 保持 controller 足够薄
+- **持有数据库事务边界**（`begin` → 读写 → `commit` / `rollback`）
 
 这里可以理解成“真正写业务编排的地方”。
 
@@ -162,19 +173,21 @@ src
 - 领域模型
 - 领域错误
 - service trait
-- repository trait
 - 常量
 
 这里不直接依赖 `axum`、`sea-orm`、JWT 或数据库连接。
+
+仓储接口需要引用 `sea_orm::ConnectionTrait`（否则无法在事务内复用），
+因此它和实现一起放在 `infrastructure/repositories`，`domain/repositories` 只保留边界说明。
 
 ### 4. `infrastructure`
 
 外部世界的实现层：
 
 - 环境配置读取
-- SeaORM 数据库连接
+- SeaORM 数据库连接、建表与种子数据
 - JWT 签发与校验
-- 未来的仓储适配器
+- 仓储适配器（接口 + SeaORM 实现）
 
 这层是最容易变化的地方，所以应该被隔离在外圈。
 
@@ -185,6 +198,7 @@ src
 - `SystemUseCase`
 - `AuthUseCase`
 - `ExampleUseCase`
+- `TransferUseCase`
 - `AppConfig`
 - `SeaORM DatabaseConnection`
 - `JwtService`
@@ -196,6 +210,7 @@ src
 ### 基础设施
 
 - `SeaORM` 数据库连接与连通性检查
+- 事务示例的建表与幂等种子数据（`acc_alice`、`acc_bob`）
 - `JWT` 调试登录与当前用户解析
 - `Swagger UI`
 - `Tracing` 请求日志
@@ -223,6 +238,84 @@ src
 - 需要非 200 语义（例如 `201 Created`）时使用 `ApiResponse::with_status(StatusCode::CREATED, ...)`。
 - `204 No Content` 这类不带响应体的状态码不属于 `ApiResponse` 的职责，由 handler 直接返回 `StatusCode`。
 
+### 事务示例：启动事务 → 读写数据 → 提交事务
+
+一次转账完整演示了事务的正确用法，是新增业务模块时最值得照抄的部分：
+
+```text
+services/transaction.rs
+  begin_with_config(Serializable)
+    ├─ 读：查询转出/转入账户余额（事务内）
+    ├─ 校验：账户存在、非同一账户、金额 > 0、余额充足
+    ├─ 写：扣减转出余额、增加转入余额、写流水、写审计日志
+    └─ 任一环节失败 → rollback（以上写入全部撤销）
+  commit
+```
+
+接口：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `POST` | `/api/v1/transactions/dev-transfer` | 执行转账事务，仅调试构建注册 |
+| `GET` | `/api/v1/transactions/{id}` | 流水详情 + 同一事务写入的审计日志 |
+| `GET` | `/api/v1/transactions` | 流水分页（`page`、`size`，`size` 上限 100） |
+
+调试构建下的完整调用流程：
+
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:8080/api/v1/auth/dev-login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"demo-admin"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["access_token"])')
+
+curl -s -X POST http://127.0.0.1:8080/api/v1/transactions/dev-transfer \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"from_account_id":"acc_alice","to_account_id":"acc_bob","amount_cents":25000,"remark":"示例转账"}'
+```
+
+响应（`data` 部分）：
+
+```json
+{
+  "record_id": "019680cc-7e1c-7ec0-b7b8-4b4f8e9dff10",
+  "from_account_id": "acc_alice",
+  "to_account_id": "acc_bob",
+  "amount_cents": 25000,
+  "from_balance_after_cents": 75000,
+  "to_balance_after_cents": 125000,
+  "committed": true,
+  "rolled_back": false
+}
+```
+
+查询流水与审计日志：
+
+```bash
+curl -s "http://127.0.0.1:8080/api/v1/transactions?page=1&size=10" -H "Authorization: Bearer $TOKEN"
+curl -s "http://127.0.0.1:8080/api/v1/transactions/<record_id>" -H "Authorization: Bearer $TOKEN"
+```
+
+约定：
+
+- **事务边界只出现在 `services` 层**：`TransferService::transfer` 是唯一调用 `begin` / `commit` / `rollback` 的地方，仓储与 controller 都不开事务。
+- **仓储方法接收 `C: ConnectionTrait`**：传入 `&DatabaseConnection` 表示不进事务，传入 `&DatabaseTransaction` 表示在调用方事务内执行，同一套方法两处复用。
+- **写入全部完成后才提交**：任何一步返回 `Err` 都会回滚，包括余额不足这类业务错误。
+- **金额用整数分**：`amount_cents: i64`，不使用浮点；账户表用自增 `version` 暴露并发丢失更新。
+- **并发安全**：事务以 `IsolationLevel::Serializable` 开启（SQLite 下即 `BEGIN IMMEDIATE`），避免「先读余额再扣减」的写偏斜。
+
+验证回滚是否真的生效（调试构建）：
+
+```bash
+# 在事务内写入全部完成后主动失败，接口返回 500
+curl -s -X POST http://127.0.0.1:8080/api/v1/transactions/dev-transfer \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"from_account_id":"acc_alice","to_account_id":"acc_bob","amount_cents":30000,"force_fail":true}'
+
+# 流水分页仍为 0，余额也未被改动，说明事务内写入全部被撤销
+curl -s "http://127.0.0.1:8080/api/v1/transactions" -H "Authorization: Bearer $TOKEN"
+```
+
+`force_fail` 字段与 `/dev-transfer` 路由都只在 debug 构建存在，release 构建下不存在该入口。
+
 ### 默认示例接口
 
 - `GET /`
@@ -233,6 +326,9 @@ src
 - `POST /api/v1/examples/echo`
 - `GET /api/v1/examples`
 - `GET /api/v1/examples/{id}`
+- `POST /api/v1/transactions/dev-transfer`（仅调试构建）
+- `GET /api/v1/transactions`
+- `GET /api/v1/transactions/{id}`
 
 ### 新增工具
 
@@ -323,11 +419,12 @@ POST /api/v1/auth/dev-login
 如果你要新增一个真实业务模块，建议按下面的顺序：
 
 1. 先在 `domain/models` 定义领域模型
-2. 在 `domain/services` 或 `domain/repositories` 定义抽象接口
-3. 在 `services` 写用例实现
-4. 如果要落库，在 `infrastructure/repositories` 写 SeaORM 适配器
-5. 在 `container.rs` 注入实现
-6. 最后在 `api/controllers` 和 `api/dto` 暴露 HTTP 接口
+2. 在 `domain/services` 定义用例接口（仓储接口属于外圈，不放这里）
+3. 在 `entities` 新增实体，并在 `infrastructure/databases/schema.rs` 补建表语句
+4. 在 `infrastructure/repositories` 写仓储接口与 SeaORM 适配器，方法接收 `C: ConnectionTrait`
+5. 在 `services` 写用例实现，**需要多步写入时在 `services/transaction.rs` 里找事务写法**
+6. 在 `container.rs` 注入实现
+7. 最后在 `api/controllers` 和 `api/dto` 暴露 HTTP 接口，并补 `docs.rs` 的 OpenAPI 声明
 
 这样做的好处是：
 
@@ -340,8 +437,14 @@ POST /api/v1/auth/dev-login
 这个脚手架没有改掉 SeaORM，而是把它放回更合理的位置：
 
 - 实体统一放在 `src/entities`
-- 数据库连接在 `src/infrastructure/databases`
-- 未来的仓储实现放在 `src/infrastructure/repositories`
+- 数据库连接、建表与种子数据在 `src/infrastructure/databases`
+- 仓储接口与实现放在 `src/infrastructure/repositories`
+
+事务也遵循同一套边界：
+
+- **只有 `services` 层开启事务**，controller 和仓储都不管事务生命周期
+- 仓储方法接收 `C: ConnectionTrait`，因此同一套方法既能用于事务内，也能用于普通查询
+- 参考实现：`services/transaction.rs`（事务边界）+ `infrastructure/repositories/transaction.rs`（读写）
 
 也就是说：
 
@@ -368,17 +471,20 @@ cargo test --all-features
 - 所有 feature 和 release 构建均可通过；
 - 测试和 Clippy 检查通过。
 
-应用启动时会创建 `_schema_migrations` 表，为后续版本化迁移保留入口。生产环境建议在部署阶段执行明确的迁移脚本，不要使用示例 JWT_SECRET。
+应用启动时会创建 `_schema_migrations` 表，为后续版本化迁移保留入口；同时创建事务示例的三张表并
+幂等播种演示账户。生产环境建议在部署阶段执行明确的迁移脚本，不要使用示例 JWT_SECRET。
+
+回滚这类“写了一半”的行为应当有测试兜底：可参考
+`services/transaction.rs` 的单测（在事务内主动失败后断言数据库无残留）与
+`tests/api_tests.rs` 中的 `transfer_rolls_back_every_write_when_force_fail_is_on`。
 
 ## 备注
 
 当前仓库还是“脚手架”，不是完整业务系统，所以：
 
-- `domain/repositories` 和 `infrastructure/repositories` 目前只保留入口
-- 示例模块仍然是演示性质
-- 真实项目里你需要按业务补全实体、仓储、事务和测试
-
-但骨架已经调整成更适合长期扩展的形态了。
+- 示例模块（`examples`）仍以演示接口协议为主，事务示例（`transactions`）才是落库与事务的参考实现
+- 事务示例是演示性质，真实项目里你需要按业务替换账户、流水与审计表
+- 骨架已经调整成更适合长期扩展的形态了
 
 ## 贡献指南
 
