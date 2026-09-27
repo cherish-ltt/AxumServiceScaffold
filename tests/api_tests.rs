@@ -441,6 +441,12 @@ fn transfer_body(amount_cents: i64) -> Value {
     })
 }
 
+fn transfer_body_with_request_id(amount_cents: i64, request_id: &str) -> Value {
+    let mut payload = transfer_body(amount_cents);
+    payload["request_id"] = json!(request_id);
+    payload
+}
+
 /// 同一事务写入的余额、流水与审计日志，提交后应当全部可见。
 #[tokio::test]
 async fn transfer_commits_balances_record_and_audits() {
@@ -449,7 +455,11 @@ async fn transfer_commits_balances_record_and_audits() {
 
     let (status, body) = send(
         app.clone(),
-        post_json_with_bearer(DEV_TRANSFER, &token, transfer_body(25000)),
+        post_json_with_bearer(
+            DEV_TRANSFER,
+            &token,
+            transfer_body_with_request_id(25000, "req-http-0001"),
+        ),
     )
     .await;
 
@@ -460,6 +470,8 @@ async fn transfer_commits_balances_record_and_audits() {
     assert_eq!(body["data"]["to_balance_after_cents"], 125000);
     assert_eq!(body["data"]["committed"], true);
     assert_eq!(body["data"]["rolled_back"], false);
+
+    assert_eq!(body["data"]["request_id"], "req-http-0001");
 
     let record_id = body["data"]["record_id"].as_str().expect("返回流水 ID");
     let (status, detail) = send(
@@ -474,6 +486,55 @@ async fn transfer_commits_balances_record_and_audits() {
     assert_eq!(audits.len(), 2);
     assert_eq!(audits[0]["action"], "BALANCE_UPDATED");
     assert_eq!(audits[1]["action"], "RECORD_CREATED");
+}
+
+/// 跨表写入过程中命中幂等键唯一约束：整体回滚并返回 409。
+#[tokio::test]
+async fn duplicate_request_id_returns_conflict_without_extra_writes() {
+    let app = setup_app().await;
+    let token = issue_dev_token(&app).await;
+
+    let (status, _) = send(
+        app.clone(),
+        post_json_with_bearer(
+            DEV_TRANSFER,
+            &token,
+            transfer_body_with_request_id(20000, "req-dup-http"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = send(
+        app.clone(),
+        post_json_with_bearer(
+            DEV_TRANSFER,
+            &token,
+            transfer_body_with_request_id(5000, "req-dup-http"),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        body["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("资源冲突")),
+        "409 应透出可读原因，实际: {body}"
+    );
+
+    // 第二次的余额更新与流水写入都被回滚，库里只剩首次结果。
+    let (status, list) = send(app.clone(), get_with_bearer("/api/v1/transactions", &token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["data"]["total"], 1);
+    assert_eq!(list["data"]["items"][0]["amount_cents"], 20000);
+
+    let (status, second) = send(
+        app,
+        post_json_with_bearer(DEV_TRANSFER, &token, transfer_body(1000)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second["data"]["from_balance_after_cents"], 79000);
 }
 
 #[tokio::test]
