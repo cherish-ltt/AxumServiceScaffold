@@ -1,4 +1,8 @@
-//! SeaORM 实体目录占位模块。
+//! SeaORM 实体目录。
 //!
-//! 洋葱架构里，实体仍然建议集中放在这里，由基础设施层的仓储适配器使用。
-//! 后续你可以通过 `sea-orm-cli generate entity` 将结果直接生成到该目录下。
+//! 洋葱架构里，实体集中放在这里，由基础设施层的仓储适配器使用。
+//! 每个实体单独一个文件，也可以通过 `sea-orm-cli generate entity` 生成到该目录下。
+
+pub mod transfer_account;
+pub mod transfer_audit;
+pub mod transfer_record;
