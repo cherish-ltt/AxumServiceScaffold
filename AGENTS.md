@@ -264,3 +264,17 @@ msrv = "1.98.1"
 - `204 No Content` 等不带响应体的状态码不属于 `ApiResponse` 职责，由 handler 直接返回 `StatusCode`。
 - `domain` 层不引入 `http::StatusCode`，错误状态码仍以 `AppError::http_code() -> u16` 表达，在外层 `src/error.rs` 才映射为 `StatusCode`。
 - 修改响应结构时必须同步更新 `README.md` 的「统一响应结构」章节与 `docs/CHANGELOG.md`。
+
+### 10.5 事务与持久化
+
+- **事务边界只允许出现在 `services` 层**：`begin` / `commit` / `rollback` 不得出现在 controller、仓储或 `domain` 中。
+- 事务必须显式开启与结束：成功路径显式 `commit`，失败路径显式 `rollback`，禁止依赖隐式提交或静默兜底。
+- 回滚失败不得覆盖原始业务错误，只记录 `warn` 日志。
+- 仓储方法签名统一接收 `C: ConnectionTrait`：传入 `&DatabaseConnection` 表示不进事务，传入 `&DatabaseTransaction` 表示在调用方事务内执行；禁止为事务单独复制一套方法。
+- 仓储接口因引用 `sea_orm::ConnectionTrait` 而归入 `infrastructure/repositories`，`domain/repositories` 只保留边界说明；`domain` 不得依赖 `sea-orm`。
+- 含泛型方法的 trait 无法作为 `dyn` 使用，仓储通过泛型参数注入 `services`；对外用例接口（`domain/services`）保持 `dyn` 兼容，由 `container.rs` 装配。
+- 读改写场景必须开启 `IsolationLevel::Serializable` 事务；金额、数量用整数最小单位表示（如 `amount_cents: i64`），禁止浮点。
+- 需要并发控制的表维护自增 `version` 列，更新时一并自增，不做静默覆盖。
+- 新增实体放在 `src/entities` 下独立文件，并在 `infrastructure/databases/schema.rs` 补对应的 `CREATE TABLE`；种子数据必须幂等（`NOT EXISTS` 或等价写法）。
+- 每个事务用例至少覆盖「提交成功」与「中途失败回滚后数据无残留」两类测试，回滚测试需断言失败前状态未被改变。
+- 参考实现：`src/services/transaction.rs`、`src/infrastructure/repositories/transaction.rs`。
