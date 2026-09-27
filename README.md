@@ -269,7 +269,8 @@ TOKEN=$(curl -s -X POST http://127.0.0.1:8080/api/v1/auth/dev-login \
 
 curl -s -X POST http://127.0.0.1:8080/api/v1/transactions/dev-transfer \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"from_account_id":"acc_alice","to_account_id":"acc_bob","amount_cents":25000,"remark":"示例转账"}'
+  -d '{"from_account_id":"acc_alice","to_account_id":"acc_bob","amount_cents":25000,
+       "remark":"示例转账","request_id":"req-20260927-0001"}'
 ```
 
 响应（`data` 部分）：
@@ -277,6 +278,7 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/transactions/dev-transfer \
 ```json
 {
   "record_id": "019680cc-7e1c-7ec0-b7b8-4b4f8e9dff10",
+  "request_id": "req-20260927-0001",
   "from_account_id": "acc_alice",
   "to_account_id": "acc_bob",
   "amount_cents": 25000,
@@ -301,6 +303,7 @@ curl -s "http://127.0.0.1:8080/api/v1/transactions/<record_id>" -H "Authorizatio
 - **写入全部完成后才提交**：任何一步返回 `Err` 都会回滚，包括余额不足这类业务错误。
 - **金额用整数分**：`amount_cents: i64`，不使用浮点；账户表用自增 `version` 暴露并发丢失更新。
 - **并发安全**：事务以 `IsolationLevel::Serializable` 开启（SQLite 下即 `BEGIN IMMEDIATE`），避免「先读余额再扣减」的写偏斜。
+- **幂等键 `request_id`**：可选。传入时写入 `transfer_records.request_id`（唯一索引），重复提交会命中约束冲突并返回 `409 Conflict`，事务内已完成的余额更新与审计写入一起回滚。
 
 验证回滚是否真的生效（调试构建）：
 
@@ -315,6 +318,25 @@ curl -s "http://127.0.0.1:8080/api/v1/transactions" -H "Authorization: Bearer $T
 ```
 
 `force_fail` 字段与 `/dev-transfer` 路由都只在 debug 构建存在，release 构建下不存在该入口。
+
+验证唯一约束冲突是否会留下半截数据：
+
+```bash
+# 首次提交成功，Alice 余额 100000 -> 80000
+curl -s -X POST http://127.0.0.1:8080/api/v1/transactions/dev-transfer \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"from_account_id":"acc_alice","to_account_id":"acc_bob","amount_cents":20000,"request_id":"req-dup-1"}'
+
+# 换金额但复用同一个幂等键：约束冲突发生在余额更新之后，接口返回 409
+curl -s -X POST http://127.0.0.1:8080/api/v1/transactions/dev-transfer \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"from_account_id":"acc_alice","to_account_id":"acc_bob","amount_cents":5000,"request_id":"req-dup-1"}'
+
+# 流水仍只有 1 条，Alice 余额仍是 80000：第二次的写入被整体回滚
+curl -s "http://127.0.0.1:8080/api/v1/transactions" -H "Authorization: Bearer $TOKEN"
+```
+
+这也是「跨表写入必须放在一个事务里」的直接证据：约束冲突不会只回滚失败的那一步。
 
 ### 默认示例接口
 
@@ -413,6 +435,19 @@ POST /api/v1/auth/dev-login
 
 - `http://127.0.0.1:8080/swagger-ui`
 - `http://127.0.0.1:8080/api-doc/openapi.json`
+
+## 数据库文件与克隆即可运行
+
+数据库文件（`scaffold.db`）被 `.gitignore` 排除，不入库：
+
+- **首次启动或首次跑测试**时自动完成初始化：建表 → 补列建索引 → 播种演示账户
+  （`acc_alice`、`acc_bob`，各 100000 分），无需任何手工步骤。
+- 初始化是幂等的：重复启动不会重复建表，也不会重复插入演示账户。
+- 老版本数据库（无 `transfer_records.request_id` 列）启动时自动补列并建唯一索引，
+  历史流水的该列为空，多个空值不触发唯一索引冲突。
+- 需要恢复到干净演示状态时，直接删除 `scaffold.db` 再启动即可。
+
+因此 `git clone` 之后直接执行 `cargo test` 或 `cargo run` 就能跑通，不依赖仓库内的二进制文件。
 
 ## 新模块建议怎么扩展
 
