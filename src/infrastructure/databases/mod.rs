@@ -6,6 +6,8 @@ use tokio::time::{Duration as TokioDuration, timeout};
 
 use crate::infrastructure::config::DatabaseConfig;
 
+pub mod schema;
+
 pub async fn connect_database(config: &DatabaseConfig) -> Result<DatabaseConnection> {
     let mut options = ConnectOptions::new(config.url.clone());
     options
@@ -40,5 +42,9 @@ pub async fn run_migrations(database: &DatabaseConnection) -> Result<()> {
         )
         .await
         .context("创建数据库迁移表失败")?;
+
+    schema::create_transfer_tables(database).await?;
+    schema::seed_transfer_accounts(database).await?;
+
     Ok(())
 }
