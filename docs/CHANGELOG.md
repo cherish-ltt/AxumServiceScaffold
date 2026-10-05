@@ -29,9 +29,10 @@
 
 - README 新增「启动配置日志」小节；「中间件配置」表格的默认值同步为 512 / 512 / 8192，
   并说明默认值与 `.env-example` 保持一致。
-- README 新增「架构动效预览」小节：封面静帧链接到 `docs/live-panel/axum-service-scaffold.mp4`，
-  并说明面板配置（`docs/live-panel/config.json`）与示意值范围。GitHub 渲染会剥离手写 `<video>` 标签，
-  仓库相对路径的 mp4 无法内嵌播放，故采用「静帧 + 点击跳转」形式。
+- README 新增「架构动效预览」小节：内嵌 `docs/live-panel/axum-service-scaffold.gif`（30 秒循环）
+  并链接到 `docs/live-panel/axum-service-scaffold.mp4`，同时说明面板配置（`docs/live-panel/config.json`）
+  与示意值范围。GitHub 渲染会剥离手写 `<video>` 标签，仓库相对路径的 mp4 无法内嵌播放，
+  故动效用 GIF 内嵌，完整画质用 mp4 点击跳转。
 
 ## [0.4.0] - 2026-10-05
 

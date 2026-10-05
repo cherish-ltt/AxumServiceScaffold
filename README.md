@@ -17,12 +17,12 @@
 ## 架构动效预览
 
 <a href="docs/live-panel/axum-service-scaffold.mp4">
-  <img src="docs/live-panel/frames/frame_1_t03.75.png" alt="项目架构动效预览" width="420" />
+  <img src="docs/live-panel/axum-service-scaffold.gif" alt="项目架构动效预览" width="420" />
 </a>
 
-点击封面可播放 30 秒的架构动效（1200×1500 终端风格），内容按本仓库实际代码整理：
-层序取自 `src/middleware/stack.rs`，路由与实体数量取自 `src/`，容量参数取自 `.env-example`。
-面板配置为 `docs/live-panel/config.json`，静帧在 `docs/live-panel/frames/`。
+上方 GIF 为循环播放的架构动效预览（30 秒，终端风格），点击可播放完整 mp4（1200×1500），
+内容按本仓库实际代码整理：层序取自 `src/middleware/stack.rs`，路由与实体数量取自 `src/`，
+容量参数取自 `.env-example`。面板配置为 `docs/live-panel/config.json`，静帧在 `docs/live-panel/frames/`。
 
 > 面板中三条占用率 bar、触发次数、请求计数为示意值，用于展示动效；其余数字均有仓库来源。
 
