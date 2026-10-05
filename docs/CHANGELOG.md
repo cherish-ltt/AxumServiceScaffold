@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 依赖版本升级：`tokio` 1.53.1→1.53.2、`sea-orm` 2.0.3→2.0.4、`uuid` 1.26.1→1.27.0。
+
 ### 新增
 
 - **启动配置快照**：`logging::log_startup_config`（`src/logging.rs`）在启动时按
