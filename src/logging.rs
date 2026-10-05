@@ -65,3 +65,103 @@ pub fn init(config: &AppConfig) -> Result<WorkerGuard> {
 
     Ok(guard)
 }
+
+/// 打印本次启动实际生效的配置，便于事后追溯启动那一刻的参数。
+///
+/// 按配置分组结构化输出；数据库连接串中的口令与 JWT 密钥只输出脱敏结果。
+pub fn log_startup_config(config: &AppConfig) {
+    let server = &config.server;
+    let database = &config.database;
+    let jwt = &config.jwt;
+    let logger = &config.logging;
+    let middleware = &config.middleware;
+
+    tracing::info!(app_name = %config.app_name, app_env = %config.app_env, "启动配置: 应用");
+    tracing::info!(host = %server.host, port = server.port, "启动配置: 服务");
+    tracing::info!(
+        url = %mask_url(&database.url),
+        min_connections = database.min_connections,
+        max_connections = database.max_connections,
+        connect_timeout_secs = database.connect_timeout_secs,
+        idle_secs = database.idle_secs,
+        sqlx_logging = database.sqlx_logging,
+        "启动配置: 数据库"
+    );
+    tracing::info!(
+        secret = %mask_secret(&jwt.secret),
+        issuer = %jwt.issuer,
+        audience = %jwt.audience,
+        access_token_ttl_minutes = jwt.access_token_ttl_minutes,
+        "启动配置: JWT"
+    );
+    tracing::info!(
+        filter = %logger.filter,
+        utc_offset_hour = logger.utc_offset_hour,
+        utc_offset_minute = logger.utc_offset_minute,
+        utc_offset_second = logger.utc_offset_second,
+        out_dir = %logger.out_dir,
+        filename_prefix = %logger.filename_prefix,
+        filename_suffix = %logger.filename_suffix,
+        rotation = ?logger.rotation,
+        max_log_files = logger.max_log_files,
+        "启动配置: 日志"
+    );
+    tracing::info!(
+        request_timeout_secs = middleware.request_timeout_secs,
+        max_body_bytes = middleware.max_body_bytes,
+        max_concurrency = middleware.max_concurrency,
+        backpressure_queue = middleware.backpressure_queue,
+        rate_limit_requests = middleware.rate_limit_requests,
+        rate_limit_period_secs = middleware.rate_limit_period_secs,
+        hsts_enabled = middleware.hsts_enabled,
+        "启动配置: 中间件"
+    );
+}
+
+/// 隐藏连接串里的口令，保留其余结构以便核对目标库。
+fn mask_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_owned();
+    };
+    let Some((userinfo, host)) = rest.split_once('@') else {
+        return url.to_owned();
+    };
+    match userinfo.split_once(':') {
+        Some((user, _)) => format!("{scheme}://{user}:***@{host}"),
+        None => url.to_owned(),
+    }
+}
+
+/// 密钥只输出长度，不泄露任何内容。
+fn mask_secret(secret: &str) -> String {
+    format!("***({} chars)", secret.chars().count())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn url_password_is_masked() {
+        assert_eq!(
+            mask_url("postgres://app:xxx@db:5432/orders"),
+            "postgres://app:***@db:5432/orders"
+        );
+        assert_eq!(
+            mask_url("mysql://root@db:3306/orders"),
+            "mysql://root@db:3306/orders"
+        );
+        assert_eq!(
+            mask_url("sqlite://scaffold.db?mode=rwc"),
+            "sqlite://scaffold.db?mode=rwc"
+        );
+    }
+
+    #[test]
+    fn secret_content_is_not_printed() {
+        let masked = mask_secret("change-me-change-me-change-me-32");
+
+        assert_eq!(masked, "***(32 chars)");
+        assert!(!masked.contains("change-me"));
+    }
+}

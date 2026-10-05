@@ -19,15 +19,17 @@ static GLOBAL: MiMalloc = MiMalloc;
 ///
 /// 1. 读取环境变量
 /// 2. 初始化日志
-/// 3. 构建全局状态
-/// 4. 构建 Axum 路由
-/// 5. 启动 HTTP 服务
+/// 3. 打印生效配置
+/// 4. 构建全局状态
+/// 5. 构建 Axum 路由
+/// 6. 启动 HTTP 服务
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
 
     let config = AppConfig::from_env()?;
     let _log_guard = logging::init(&config)?;
+    logging::log_startup_config(&config);
 
     let container = Arc::new(Container::bootstrap(config).await?);
     let app = create_app(container.clone());
