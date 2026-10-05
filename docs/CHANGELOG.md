@@ -13,7 +13,8 @@
   「应用 / 服务 / 数据库 / JWT / 日志 / 中间件」六组结构化打印本次生效的配置；
   调用点位于 `src/main.rs` 日志初始化之后、`Container::bootstrap` 之前，
   数据库引导失败时也能看到配置。
-- 脱敏：`DATABASE_URL` 中的口令被替换为 `***`，`JWT_SECRET` 只输出字符数，
+- 脱敏：`DATABASE_URL` 中的口令被替换为 `***`（同时支持 `user:password@host` 与
+  `?password=` 两种写法，口令中含 `@` 或 `:` 也不会漏出）；`JWT_SECRET` 只输出字符数，
   敏感信息不落日志。
 
 ### 变更

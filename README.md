@@ -301,7 +301,8 @@ src
 `log_startup_config`），并且同样写入日志文件，便于事后回溯进程启动那一刻用的参数：
 
 - 分为「应用 / 服务 / 数据库 / JWT / 日志 / 中间件」六组，字段直接取自 `AppConfig`；
-- `DATABASE_URL` 中的口令被替换为 `***`，`JWT_SECRET` 只输出字符数（如 `secret=***(56 chars)`），
+- `DATABASE_URL` 中的口令被替换为 `***`（`user:password@host` 与 `?password=` 两种写法都支持，
+  口令里含 `@` 或 `:` 也不会漏出），`JWT_SECRET` 只输出字符数（如 `secret=***(56 chars)`），
   密钥不会被写进日志；
 - 打印时机在日志初始化之后、`Container::bootstrap` 之前（`src/main.rs`），
   因此数据库引导失败时也能看到配置快照。
