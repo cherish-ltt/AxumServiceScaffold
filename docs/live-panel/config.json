@@ -1,0 +1,1066 @@
+{
+  "meta": {
+    "title": "Axum Service Scaffold · 洋葱架构常驻面板",
+    "lang": "zh-CN"
+  },
+  "canvas": {
+    "preset": "4:5",
+    "width": 1200,
+    "height": 1500,
+    "duration": 30,
+    "fps": 30,
+    "preroll": 12
+  },
+  "theme": {
+    "preset": "terminal-dark",
+    "font": "\"JetBrains Mono\",\"IBM Plex Mono\",\"DejaVu Sans Mono\",\"Noto Sans Mono CJK SC\",monospace",
+    "fontSize": 21,
+    "lineHeight": 30,
+    "colors": {
+      "bg": "#14171c",
+      "bar": "#262a32",
+      "line": "#4a5367",
+      "line2": "#3a4154",
+      "dim": "#6f788c",
+      "mute": "#aab1c0",
+      "fg": "#e4e8f0",
+      "wh": "#ffffff",
+      "cy": "#86e1e6",
+      "bl": "#8fb4f6",
+      "gr": "#7fdba8",
+      "pu": "#b9a2f2",
+      "ye": "#e3c07a",
+      "hl": "#2f2b45",
+      "dots": "#566078"
+    }
+  },
+  "clock": {
+    "start": "09:12:04",
+    "rate": 1
+  },
+  "titlebar": {
+    "text": "~/axum-service-scaffold — zsh — 90x46"
+  },
+  "credit": {
+    "text": "数据取自仓库 v0.4.0（Cargo.toml / README / .env-example / cargo 统计）· 占用率与计数为示意值 · 动效语汇 after @thedelost (live-panel)",
+    "y": 1486
+  },
+  "machines": {
+    "conc": {
+      "type": "gauge",
+      "values": [0.42, 0.58, 0.71, 0.36, 0.63, 0.49, 0.77],
+      "threshold": 0.75,
+      "period": 3.4,
+      "t0": 0.6,
+      "seed": 11,
+      "high": {
+        "label": "余量充足",
+        "dest": "直接放行"
+      },
+      "low": {
+        "label": "余量不足",
+        "dest": "进入队列"
+      },
+      "log": {
+        "who": "conc",
+        "c": "cy",
+        "msgs": ["并发余量（示意）", "并发上限 512 的余量（示意）"],
+        "tail": "p={value}  {label} → {dest}"
+      }
+    },
+    "queue": {
+      "type": "gauge",
+      "values": [0.18, 0.35, 0.12, 0.62, 0.28, 0.44, 0.81],
+      "threshold": 0.75,
+      "period": 4.1,
+      "t0": 1.7,
+      "seed": 23,
+      "high": {
+        "label": "余量充足",
+        "dest": "立即执行"
+      },
+      "low": {
+        "label": "余量告急",
+        "dest": "背压 503"
+      },
+      "log": {
+        "who": "queue",
+        "c": "cy",
+        "msgs": ["有界队列余量（示意）"],
+        "tail": "p={value}  {label} → {dest}"
+      }
+    },
+    "rate": {
+      "type": "gauge",
+      "values": [0.31, 0.52, 0.24, 0.66, 0.41, 0.19, 0.73],
+      "threshold": 0.75,
+      "period": 4.9,
+      "t0": 2.4,
+      "seed": 37,
+      "high": {
+        "label": "额度充足",
+        "dest": "放行"
+      },
+      "low": {
+        "label": "额度吃紧",
+        "dest": "限流 429"
+      },
+      "log": {
+        "who": "rate",
+        "c": "pu",
+        "msgs": ["限流窗口余量（示意）"],
+        "tail": "p={value}  {label} → {dest}"
+      }
+    },
+    "press": {
+      "type": "any_low",
+      "of": ["conc", "queue", "rate"]
+    },
+    "txjob": {
+      "type": "lane",
+      "period": 9,
+      "run": 6.5,
+      "off": 1.0,
+      "busy": "事务执行中",
+      "done": ["已提交"],
+      "phase": 0,
+      "log": {
+        "who": "svc",
+        "c": "bl",
+        "msgs": [
+          ["dev-transfer 提交 · 4 步写入", ""],
+          ["流水 + 审计同事务写入", ""]
+        ]
+      }
+    },
+    "guard": {
+      "type": "triggers",
+      "color": "pu",
+      "period": 4.5,
+      "on": 3.0,
+      "t0": -1.6,
+      "callsStart": 1,
+      "tokens": {
+        "start": 1280,
+        "step": 512,
+        "unit": ""
+      },
+      "onText": "触发中",
+      "offText": "在岗",
+      "items": [
+        {
+          "name": "背压 503",
+          "adv": ["» 队列已满", "» 立即 503"]
+        },
+        {
+          "name": "限流 429",
+          "adv": ["» 窗口吃紧", "» 立即 429"]
+        },
+        {
+          "name": "超时 408",
+          "adv": ["» 已超 10s", "» 查慢查询与下游"]
+        }
+      ],
+      "log": {
+        "who": "guard",
+        "c": "pu",
+        "start": {
+          "m": "{name} · 触发"
+        },
+        "end": {
+          "m": "{name} · 恢复"
+        }
+      }
+    },
+    "reqs": {
+      "type": "counter",
+      "start": 128000,
+      "rate": 96,
+      "format": "comma"
+    }
+  },
+  "elements": [
+    {
+      "type": "box",
+      "x": 34,
+      "y": 172,
+      "w": 282,
+      "h": 1014,
+      "color": "pu",
+      "pad": [14, 6, 6],
+      "lines": [
+        {
+          "t": "中间件栈",
+          "c": "pu",
+          "b": 1
+        },
+        {
+          "t": "tower ServiceBuilder",
+          "c": "pu"
+        },
+        {
+          "trigger": ["guard", 0]
+        },
+        "",
+        {
+          "trigger": ["guard", 1]
+        },
+        "",
+        {
+          "trigger": ["guard", 2]
+        },
+        "",
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "背压 有界队列 512"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "限流 8192 req/s / 1s"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "超时 10s · 压缩 gzip"
+        },
+        "",
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "容量全部来自 .env"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "代码无字面量"
+        },
+        "",
+        {
+          "indent": 13,
+          "items": [
+            {
+              "w": 130,
+              "runs": [
+                {
+                  "t": "触发次数",
+                  "c": "mute"
+                }
+              ]
+            },
+            {
+              "w": 70,
+              "align": "right",
+              "runs": [
+                {
+                  "v": "guard.calls",
+                  "c": "pu",
+                  "b": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "累计拒绝（示意）"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "runs": [
+            {
+              "v": "guard.tokens",
+              "c": "pu"
+            }
+          ]
+        },
+        "",
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "最近一次建议"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "runs": [
+            {
+              "v": "guard.adv0",
+              "c": "pu",
+              "b": 1
+            }
+          ]
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "runs": [
+            {
+              "v": "guard.adv1",
+              "c": "pu",
+              "b": 1
+            }
+          ]
+        },
+        "",
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "同一栈内统一兜住"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "错误响应复用统一结构"
+        },
+        "",
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "mute",
+          "t": "层序（外 → 内）"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "dim",
+          "t": "request-id · trace"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "dim",
+          "t": "安全头 · 背压 · 限流"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "dim",
+          "t": "压缩 · 超时 10s"
+        },
+        {
+          "align": "left",
+          "indent": 13,
+          "c": "dim",
+          "t": "body 2 MiB · CORS"
+        }
+      ]
+    },
+    {
+      "type": "tarrow",
+      "machine": "guard",
+      "i": 0,
+      "from": [322, 261],
+      "to": [378, 261]
+    },
+    {
+      "type": "tarrow",
+      "machine": "guard",
+      "i": 1,
+      "from": [322, 316],
+      "to": [378, 316]
+    },
+    {
+      "type": "tarrow",
+      "machine": "guard",
+      "i": 2,
+      "from": [322, 366],
+      "to": [378, 366]
+    },
+    {
+      "type": "box",
+      "x": 385,
+      "y": 172,
+      "w": 750,
+      "h": 200,
+      "color": "pu",
+      "pad": [13, 14],
+      "lines": [
+        {
+          "runs": [
+            {
+              "t": "中间件栈",
+              "c": "pu",
+              "b": 1
+            },
+            {
+              "t": "  ·  tower::ServiceBuilder",
+              "c": "pu"
+            },
+            {
+              "t": "  16 层 · 占用率为示意",
+              "c": "dim"
+            }
+          ]
+        },
+        {
+          "items": [
+            {
+              "w": 200,
+              "runs": [
+                {
+                  "t": "并发余量",
+                  "c": "mute"
+                }
+              ]
+            },
+            {
+              "w": 150,
+              "bar": {
+                "gauge": "conc",
+                "w": 127,
+                "h": 20,
+                "high": "gr",
+                "low": "cy"
+              }
+            },
+            {
+              "runs": [
+                {
+                  "v": "conc",
+                  "c": "fg",
+                  "when": {
+                    "var": "conc.low",
+                    "eq": "1"
+                  },
+                  "then": {
+                    "b": 1,
+                    "c": "wh"
+                  }
+                },
+                {
+                  "t": "  "
+                },
+                {
+                  "v": "conc.label"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "items": [
+            {
+              "w": 200,
+              "runs": [
+                {
+                  "t": "队列余量",
+                  "c": "mute"
+                }
+              ]
+            },
+            {
+              "w": 150,
+              "bar": {
+                "gauge": "queue",
+                "w": 127,
+                "h": 20,
+                "high": "gr",
+                "low": "cy"
+              }
+            },
+            {
+              "runs": [
+                {
+                  "v": "queue",
+                  "c": "fg",
+                  "when": {
+                    "var": "queue.low",
+                    "eq": "1"
+                  },
+                  "then": {
+                    "b": 1,
+                    "c": "wh"
+                  }
+                },
+                {
+                  "t": "  "
+                },
+                {
+                  "v": "queue.label"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "items": [
+            {
+              "w": 200,
+              "runs": [
+                {
+                  "t": "限流余量",
+                  "c": "mute"
+                }
+              ]
+            },
+            {
+              "w": 150,
+              "bar": {
+                "gauge": "rate",
+                "w": 127,
+                "h": 20,
+                "high": "gr",
+                "low": "pu"
+              }
+            },
+            {
+              "runs": [
+                {
+                  "v": "rate",
+                  "c": "fg",
+                  "when": {
+                    "var": "rate.low",
+                    "eq": "1"
+                  },
+                  "then": {
+                    "b": 1,
+                    "c": "wh"
+                  }
+                },
+                {
+                  "t": "  "
+                },
+                {
+                  "v": "rate.label"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "runs": [
+            {
+              "t": "背压 有界队列 512 → 503",
+              "c": "dim",
+              "when": {
+                "var": "press",
+                "eq": "low"
+              },
+              "then": {
+                "c": "gr",
+                "b": 1
+              }
+            },
+            {
+              "t": "    "
+            },
+            {
+              "t": "限流 8192 req/s 进程级 → 429",
+              "c": "dim",
+              "when": {
+                "var": "press",
+                "eq": "high"
+              },
+              "then": {
+                "c": "pu",
+                "b": 1
+              }
+            }
+          ]
+        },
+        {
+          "c": "dim",
+          "t": "背压 512 并发 + 512 队列 + LoadShed；限流 8192 req/s"
+        }
+      ]
+    },
+    {
+      "type": "line",
+      "from": [760, 372],
+      "to": [760, 412]
+    },
+    {
+      "type": "box",
+      "x": 385,
+      "y": 412,
+      "w": 750,
+      "h": 170,
+      "color": "cy",
+      "pad": [13, 14],
+      "lines": [
+        {
+          "runs": [
+            {
+              "t": "api · 入口适配层",
+              "c": "cy",
+              "b": 1
+            },
+            {
+              "t": "  controllers 4 · dto 4 · extractors 1",
+              "c": "dim"
+            }
+          ]
+        },
+        {
+          "t": "11 条路由 · nest(/api/v1) · swagger-ui 仅 debug"
+        },
+        {
+          "t": "统一响应 ApiResponse<T>：code 由 HTTP 状态派生"
+        },
+        {
+          "t": "只做协议适配：JWT 提取 CurrentUser"
+        },
+        {
+          "t": "dev-login / force_fail 仅 debug 构建存在"
+        }
+      ]
+    },
+    {
+      "type": "line",
+      "from": [760, 582],
+      "to": [760, 622]
+    },
+    {
+      "type": "box",
+      "x": 385,
+      "y": 622,
+      "w": 750,
+      "h": 196,
+      "color": "bl",
+      "pad": [13, 14],
+      "lines": [
+        {
+          "runs": [
+            {
+              "t": "services · 用例编排层",
+              "c": "bl",
+              "b": 1
+            },
+            {
+              "t": "  唯一持有事务边界",
+              "c": "dim"
+            }
+          ]
+        },
+        {
+          "t": "AuthUseCase · ExampleUseCase · SystemUseCase"
+        },
+        {
+          "t": "TransferUseCase · 转账事务（Serializable）"
+        },
+        {
+          "items": [
+            {
+              "w": 200,
+              "runs": [
+                {
+                  "t": "事务状态",
+                  "c": "mute"
+                }
+              ]
+            },
+            {
+              "runs": [
+                {
+                  "v": "txjob"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "begin → 校验 → 写余额+流水+审计 → commit"
+        },
+        {
+          "t": "任一步 Err → rollback；request_id 唯一索引"
+        }
+      ]
+    },
+    {
+      "type": "line",
+      "from": [760, 818],
+      "to": [760, 858]
+    },
+    {
+      "type": "box",
+      "x": 385,
+      "y": 858,
+      "w": 750,
+      "h": 140,
+      "color": "gr",
+      "pad": [13, 14],
+      "lines": [
+        {
+          "runs": [
+            {
+              "t": "domain · 领域内核",
+              "c": "gr",
+              "b": 1
+            },
+            {
+              "t": "  依赖只向内",
+              "c": "dim"
+            }
+          ]
+        },
+        {
+          "t": "models 4 · 用例 trait 4 · AppError → u16"
+        },
+        {
+          "t": "不依赖 axum / sea-orm / JWT / 数据库连接"
+        },
+        {
+          "t": "仓储接口需 ConnectionTrait → 放 infrastructure"
+        }
+      ]
+    },
+    {
+      "type": "line",
+      "from": [760, 998],
+      "to": [760, 1038]
+    },
+    {
+      "type": "box",
+      "x": 385,
+      "y": 1038,
+      "w": 750,
+      "h": 140,
+      "color": "ye",
+      "pad": [13, 14],
+      "lines": [
+        {
+          "runs": [
+            {
+              "t": "infrastructure · 外圈实现",
+              "c": "ye",
+              "b": 1
+            },
+            {
+              "t": "  container.rs 统一装配",
+              "c": "dim"
+            }
+          ]
+        },
+        {
+          "items": [
+            {
+              "w": 230,
+              "runs": [
+                {
+                  "t": "SeaORM 仓储",
+                  "c": "ye"
+                }
+              ]
+            },
+            {
+              "w": 230,
+              "runs": [
+                {
+                  "t": "JWT · aws_lc_rs",
+                  "c": "ye"
+                }
+              ]
+            },
+            {
+              "runs": [
+                {
+                  "t": "AppConfig · .env",
+                  "c": "ye"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "t": "SQLite scaffold.db · 3 张表 + 幂等种子 acc_alice/acc_bob"
+        },
+        {
+          "t": "金额整数分 (i64) · version 自增 · 老库自动补列"
+        }
+      ]
+    },
+    {
+      "type": "flow",
+      "path": [
+        [760, 372],
+        [760, 412]
+      ],
+      "period": 2,
+      "offsets": [0, 1.1],
+      "color": "pu"
+    },
+    {
+      "type": "flow",
+      "path": [
+        [760, 582],
+        [760, 622]
+      ],
+      "period": 2.6,
+      "offsets": [0.4],
+      "color": "cy"
+    },
+    {
+      "type": "flow",
+      "path": [
+        [760, 818],
+        [760, 858]
+      ],
+      "period": 3,
+      "offsets": [0.2, 1.5],
+      "color": "bl"
+    },
+    {
+      "type": "flow",
+      "path": [
+        [760, 998],
+        [760, 1038]
+      ],
+      "period": 2.2,
+      "offsets": [0.9],
+      "color": "gr"
+    },
+    {
+      "type": "log",
+      "x": 40,
+      "y": 1246,
+      "w": 1130,
+      "rows": 4,
+      "padTop": 16,
+      "padBottom": 29,
+      "padLeft": 20,
+      "title": "运行日志",
+      "titleX": 36,
+      "titleW": 182,
+      "cols": [
+        {
+          "key": "time",
+          "x": 0
+        },
+        {
+          "key": "who",
+          "x": 126
+        },
+        {
+          "key": "m",
+          "x": 266
+        },
+        {
+          "key": "g",
+          "x": 697
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "x": 0,
+      "w": 1200,
+      "y": 79,
+      "align": "center",
+      "ls": 1,
+      "runs": [
+        {
+          "t": "AXUM SERVICE SCAFFOLD",
+          "c": "wh",
+          "b": 1
+        },
+        {
+          "t": "  ·  ",
+          "c": "dim"
+        },
+        {
+          "t": "ONION",
+          "c": "cy",
+          "b": 1
+        },
+        {
+          "t": " 4 层",
+          "c": "wh",
+          "b": 1
+        },
+        {
+          "t": "  ·  ",
+          "c": "dim"
+        },
+        {
+          "t": "MIDDLEWARE",
+          "c": "pu",
+          "b": 1
+        },
+        {
+          "t": " 16 层在岗",
+          "c": "wh",
+          "b": 1
+        }
+      ]
+    },
+    {
+      "type": "rule",
+      "x": 34,
+      "y": 108,
+      "w": 1132
+    },
+    {
+      "type": "text",
+      "x": 0,
+      "w": 1200,
+      "y": 141,
+      "align": "center",
+      "runs": [
+        {
+          "sw": "cy"
+        },
+        {
+          "t": "api 入口层",
+          "c": "dim"
+        },
+        {
+          "t": "      ",
+          "c": "dim"
+        },
+        {
+          "sw": "bl"
+        },
+        {
+          "t": "services 用例层",
+          "c": "dim"
+        },
+        {
+          "t": "      ",
+          "c": "dim"
+        },
+        {
+          "sw": "gr"
+        },
+        {
+          "t": "domain 内核",
+          "c": "dim"
+        },
+        {
+          "t": "      ",
+          "c": "dim"
+        },
+        {
+          "sw": "ye"
+        },
+        {
+          "t": "infra 外圈实现",
+          "c": "dim"
+        },
+        {
+          "t": "      ",
+          "c": "dim"
+        },
+        {
+          "sw": "pu"
+        },
+        {
+          "t": "中间件栈",
+          "c": "dim"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "x": 34,
+      "y": 1429,
+      "runs": [
+        {
+          "t": "~/axum-service-scaffold $",
+          "c": "gr",
+          "b": 1
+        },
+        {
+          "t": " cargo "
+        },
+        {
+          "t": "run",
+          "c": "ye"
+        },
+        {
+          "t": " --release",
+          "c": "ye"
+        },
+        {
+          "t": "  ·  v0.4.0 · rust 1.98.1 · axum 0.8.9",
+          "c": "dim"
+        },
+        {
+          "cursor": true,
+          "c": "gr"
+        }
+      ]
+    },
+    {
+      "type": "text",
+      "x": 34,
+      "y": 1461,
+      "runs": [
+        {
+          "t": "层 ",
+          "c": "dim"
+        },
+        {
+          "t": "[4+container]",
+          "c": "bl",
+          "b": 1
+        },
+        {
+          "t": "  路由 ",
+          "c": "dim"
+        },
+        {
+          "t": "[11]",
+          "c": "cy",
+          "b": 1
+        },
+        {
+          "t": "  中间件 ",
+          "c": "dim"
+        },
+        {
+          "t": "[16]",
+          "c": "pu",
+          "b": 1
+        },
+        {
+          "t": "  测试 ",
+          "c": "dim"
+        },
+        {
+          "t": "[99]",
+          "c": "gr",
+          "b": 1
+        },
+        {
+          "t": "  请求 ",
+          "c": "dim"
+        },
+        {
+          "t": "[",
+          "c": "ye"
+        },
+        {
+          "v": "reqs",
+          "c": "ye",
+          "b": 1
+        },
+        {
+          "t": "] 示意",
+          "c": "dim"
+        },
+        {
+          "t": "  pkt ",
+          "c": "dim"
+        },
+        {
+          "v": "packets",
+          "c": "dim",
+          "b": 1
+        }
+      ]
+    }
+  ]
+}
