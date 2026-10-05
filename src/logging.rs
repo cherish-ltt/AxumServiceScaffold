@@ -119,17 +119,50 @@ pub fn log_startup_config(config: &AppConfig) {
 }
 
 /// 隐藏连接串里的口令，保留其余结构以便核对目标库。
+///
+/// 同时处理 `scheme://user:password@host/db` 与 `scheme://host/db?password=xxx`
+/// 两种写法：前者按最后一个 `@` 切分（口令里含 `@` 或 `:` 时也不会漏出），
+/// 后者按参数名替换口令值。
 fn mask_url(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         return url.to_owned();
     };
-    let Some((userinfo, host)) = rest.split_once('@') else {
-        return url.to_owned();
+    let end = rest.find(['/', '?']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(end);
+
+    let authority = match authority.rsplit_once('@') {
+        Some((userinfo, host)) => match userinfo.split_once(':') {
+            Some((user, _)) => format!("{user}:***@{host}"),
+            None => authority.to_owned(),
+        },
+        None => authority.to_owned(),
     };
-    match userinfo.split_once(':') {
-        Some((user, _)) => format!("{scheme}://{user}:***@{host}"),
-        None => url.to_owned(),
-    }
+
+    format!("{scheme}://{authority}{}", mask_query_password(tail))
+}
+
+/// 把查询参数里的口令值替换为 `***`。
+fn mask_query_password(tail: &str) -> String {
+    let Some((path, query)) = tail.split_once('?') else {
+        return tail.to_owned();
+    };
+    let masked = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((key, _)) if is_password_key(key) => format!("{key}=***"),
+            _ => pair.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+
+    format!("{path}?{masked}")
+}
+
+fn is_password_key(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "password" | "passwd" | "pwd"
+    )
 }
 
 /// 密钥只输出长度，不泄露任何内容。
@@ -147,6 +180,21 @@ mod tests {
             mask_url("postgres://app:xxx@db:5432/orders"),
             "postgres://app:***@db:5432/orders"
         );
+        assert_eq!(
+            mask_url("mysql://root:xxx@db:3306/orders"),
+            "mysql://root:***@db:3306/orders"
+        );
+        // 口令本身含 @ 或 : 时也不能漏出
+        assert_eq!(
+            mask_url("mysql://root:p@ss:word@db:3306/orders"),
+            "mysql://root:***@db:3306/orders"
+        );
+        // 查询参数形式的口令
+        assert_eq!(
+            mask_url("postgres://db:5432/orders?user=app&password=xxx&sslmode=require"),
+            "postgres://db:5432/orders?user=app&password=***&sslmode=require"
+        );
+        // 无口令的连接串保持原样
         assert_eq!(
             mask_url("mysql://root@db:3306/orders"),
             "mysql://root@db:3306/orders"
