@@ -1,5 +1,5 @@
 use axum_service_scaffold::infrastructure::config::{
-    AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, ServerConfig,
+    AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, MiddlewareConfig, ServerConfig,
 };
 use axum_service_scaffold::logging;
 use tracing_appender::rolling::Rotation;
@@ -39,6 +39,15 @@ fn test_config(out_dir: &str, utc_offset_hour: i8, utc_offset_minute: i8) -> App
             rotation: Rotation::NEVER,
             max_log_files: 2,
             out_dir: out_dir.to_string(),
+        },
+        middleware: MiddlewareConfig {
+            request_timeout_secs: 10,
+            max_body_bytes: 2 * 1024 * 1024,
+            max_concurrency: 256,
+            backpressure_queue: 256,
+            rate_limit_requests: 1000,
+            rate_limit_period_secs: 1,
+            hsts_enabled: false,
         },
     }
 }

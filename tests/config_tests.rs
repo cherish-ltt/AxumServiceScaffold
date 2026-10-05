@@ -81,6 +81,13 @@ fn valid_config_loads_with_defaults() {
             ("LOG_ROTATION", None),
             ("LOG_MAX_LOG_FILES", None),
             ("LOG_OUT_DIR", None),
+            ("MIDDLEWARE_REQUEST_TIMEOUT_SECS", None),
+            ("MIDDLEWARE_MAX_BODY_BYTES", None),
+            ("MIDDLEWARE_MAX_CONCURRENCY", None),
+            ("MIDDLEWARE_BACKPRESSURE_QUEUE", None),
+            ("MIDDLEWARE_RATE_LIMIT_REQUESTS", None),
+            ("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", None),
+            ("MIDDLEWARE_HSTS_ENABLED", None),
         ],
         || {
             let config = AppConfig::from_env().expect("默认配置应可加载");
@@ -104,6 +111,14 @@ fn valid_config_loads_with_defaults() {
             assert_eq!(config.logging.max_log_files, 30);
             assert_eq!(config.logging.out_dir, "/var/log/axum-app");
             assert!(rotation_debug(&config.logging.rotation).contains("daily"));
+
+            assert_eq!(config.middleware.request_timeout_secs, 10);
+            assert_eq!(config.middleware.max_body_bytes, 2 * 1024 * 1024);
+            assert_eq!(config.middleware.max_concurrency, 256);
+            assert_eq!(config.middleware.backpressure_queue, 256);
+            assert_eq!(config.middleware.rate_limit_requests, 1000);
+            assert_eq!(config.middleware.rate_limit_period_secs, 1);
+            assert!(!config.middleware.hsts_enabled);
         },
     );
 }
@@ -332,4 +347,69 @@ fn socket_addr_rejects_invalid_host() {
         port: 8080,
     };
     assert!(server.socket_addr().is_err());
+}
+
+#[test]
+fn middleware_overrides_are_applied() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("MIDDLEWARE_REQUEST_TIMEOUT_SECS", Some("3")),
+            ("MIDDLEWARE_MAX_BODY_BYTES", Some("1024")),
+            ("MIDDLEWARE_MAX_CONCURRENCY", Some("8")),
+            ("MIDDLEWARE_BACKPRESSURE_QUEUE", Some("4")),
+            ("MIDDLEWARE_RATE_LIMIT_REQUESTS", Some("50")),
+            ("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", Some("2")),
+            ("MIDDLEWARE_HSTS_ENABLED", Some("true")),
+        ],
+        || {
+            let config = AppConfig::from_env().expect("中间件覆盖项应可加载");
+
+            assert_eq!(config.middleware.request_timeout_secs, 3);
+            assert_eq!(config.middleware.max_body_bytes, 1024);
+            assert_eq!(config.middleware.max_concurrency, 8);
+            assert_eq!(config.middleware.backpressure_queue, 4);
+            assert_eq!(config.middleware.rate_limit_requests, 50);
+            assert_eq!(config.middleware.rate_limit_period_secs, 2);
+            assert!(config.middleware.hsts_enabled);
+        },
+    );
+}
+
+#[test]
+fn middleware_hsts_defaults_to_production_only() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("APP_ENV", Some("production")),
+            ("MIDDLEWARE_HSTS_ENABLED", None),
+        ],
+        || {
+            let config = AppConfig::from_env().expect("生产配置应可加载");
+            assert!(config.middleware.hsts_enabled);
+        },
+    );
+}
+
+#[test]
+fn zero_middleware_capacity_is_rejected() {
+    for key in [
+        "MIDDLEWARE_REQUEST_TIMEOUT_SECS",
+        "MIDDLEWARE_MAX_BODY_BYTES",
+        "MIDDLEWARE_MAX_CONCURRENCY",
+        "MIDDLEWARE_BACKPRESSURE_QUEUE",
+        "MIDDLEWARE_RATE_LIMIT_REQUESTS",
+        "MIDDLEWARE_RATE_LIMIT_PERIOD_SECS",
+    ] {
+        with_env(
+            &[("JWT_SECRET", Some(CUSTOM_SECRET)), (key, Some("0"))],
+            || {
+                let error = AppConfig::from_env().expect_err("容量参数为 0 应被拒绝");
+                assert!(
+                    error.to_string().contains("MIDDLEWARE 容量参数必须大于 0"),
+                    "{key} 的报错信息不符合预期: {error}"
+                );
+            },
+        );
+    }
 }

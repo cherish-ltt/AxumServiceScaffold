@@ -6,7 +6,7 @@ use axum::http::{Request, StatusCode, header};
 use axum_service_scaffold::container::Container;
 use axum_service_scaffold::create_app::create_app;
 use axum_service_scaffold::infrastructure::config::{
-    AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, ServerConfig,
+    AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, MiddlewareConfig, ServerConfig,
 };
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -56,6 +56,15 @@ async fn setup_app() -> Router {
             rotation: Rotation::NEVER,
             max_log_files: 1,
             out_dir: std::env::temp_dir().to_string_lossy().to_string(),
+        },
+        middleware: MiddlewareConfig {
+            request_timeout_secs: 10,
+            max_body_bytes: 2 * 1024 * 1024,
+            max_concurrency: 256,
+            backpressure_queue: 256,
+            rate_limit_requests: 1000,
+            rate_limit_period_secs: 1,
+            hsts_enabled: false,
         },
     };
 

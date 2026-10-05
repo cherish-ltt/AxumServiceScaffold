@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub database: DatabaseConfig,
     pub jwt: JwtConfig,
     pub logging: LoggingConfig,
+    pub middleware: MiddlewareConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +58,25 @@ pub struct LoggingConfig {
     pub rotation: Rotation,
     pub max_log_files: usize,
     pub out_dir: String,
+}
+
+/// HTTP 中间件容量参数，全部集中在 `.env`，业务代码不得内联这些数字。
+#[derive(Debug, Clone)]
+pub struct MiddlewareConfig {
+    /// 单个请求从进入服务到响应完成的整体超时（秒）。
+    pub request_timeout_secs: u64,
+    /// 请求体最大字节数。
+    pub max_body_bytes: usize,
+    /// 同时进入 handler 的最大请求数。
+    pub max_concurrency: usize,
+    /// 并发已满时允许排队等待的请求数，超出部分快速拒绝。
+    pub backpressure_queue: usize,
+    /// 全局限流窗口内允许的请求数。
+    pub rate_limit_requests: u64,
+    /// 全局限流窗口长度（秒）。
+    pub rate_limit_period_secs: u64,
+    /// 是否下发 HSTS 响应头，默认跟随 `APP_ENV`。
+    pub hsts_enabled: bool,
 }
 
 impl AppConfig {
@@ -132,6 +152,29 @@ impl AppConfig {
             out_dir: get_env_or("LOG_OUT_DIR", "/var/log/axum-app"),
         };
 
+        let middleware = MiddlewareConfig {
+            request_timeout_secs: parse_env_or("MIDDLEWARE_REQUEST_TIMEOUT_SECS", 10_u64)?,
+            max_body_bytes: parse_env_or("MIDDLEWARE_MAX_BODY_BYTES", 2 * 1024 * 1024_usize)?,
+            max_concurrency: parse_env_or("MIDDLEWARE_MAX_CONCURRENCY", 256_usize)?,
+            backpressure_queue: parse_env_or("MIDDLEWARE_BACKPRESSURE_QUEUE", 256_usize)?,
+            rate_limit_requests: parse_env_or("MIDDLEWARE_RATE_LIMIT_REQUESTS", 1000_u64)?,
+            rate_limit_period_secs: parse_env_or("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", 1_u64)?,
+            hsts_enabled: parse_env_or(
+                "MIDDLEWARE_HSTS_ENABLED",
+                app_env.eq_ignore_ascii_case("production"),
+            )?,
+        };
+
+        if middleware.request_timeout_secs == 0
+            || middleware.max_body_bytes == 0
+            || middleware.max_concurrency == 0
+            || middleware.backpressure_queue == 0
+            || middleware.rate_limit_requests == 0
+            || middleware.rate_limit_period_secs == 0
+        {
+            return Err(anyhow!("MIDDLEWARE 容量参数必须大于 0"));
+        }
+
         Ok(Self {
             app_name,
             app_env,
@@ -139,6 +182,7 @@ impl AppConfig {
             database,
             jwt,
             logging,
+            middleware,
         })
     }
 }
