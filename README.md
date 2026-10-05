@@ -295,6 +295,22 @@ src
   过大则慢请求会长时间占住并发额度。
 - `MIDDLEWARE_MAX_BODY_BYTES`：按最大上传接口的实际需求设置，默认 2 MiB 对 JSON API 足够宽裕。
 
+### 启动配置日志
+
+`cargo run` 启动时会把本次**实际生效**的配置按分组结构化打印出来（`src/logging.rs` 的
+`log_startup_config`），并且同样写入日志文件，便于事后回溯进程启动那一刻用的参数：
+
+- 分为「应用 / 服务 / 数据库 / JWT / 日志 / 中间件」六组，字段直接取自 `AppConfig`；
+- `DATABASE_URL` 中的口令被替换为 `***`，`JWT_SECRET` 只输出字符数（如 `secret=***(56 chars)`），
+  密钥不会被写进日志；
+- 打印时机在日志初始化之后、`Container::bootstrap` 之前（`src/main.rs`），
+  因此数据库引导失败时也能看到配置快照。
+
+`.env-public` 是入库的示例文件，其中容量参数是按实测调过的示例值（`MIDDLEWARE_MAX_CONCURRENCY=512`、
+`MIDDLEWARE_BACKPRESSURE_QUEUE=512`、`MIDDLEWARE_RATE_LIMIT_REQUESTS=8192`）；
+上表的「默认值」指代码里 `MiddlewareConfig` 的兜底默认值（256 / 256 / 1000）。
+两者不一致时以启动日志打印的实际值为准。
+
 ### 最小压测方法
 
 先确认并发上限，再确定限速额度。以 [oha](https://github.com/hatoo/oha) 为例：

@@ -5,6 +5,27 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 新增
+
+- **启动配置快照**：`logging::log_startup_config`（`src/logging.rs`）在启动时按
+  「应用 / 服务 / 数据库 / JWT / 日志 / 中间件」六组结构化打印本次生效的配置；
+  调用点位于 `src/main.rs` 日志初始化之后、`Container::bootstrap` 之前，
+  数据库引导失败时也能看到配置。
+- 脱敏：`DATABASE_URL` 中的口令被替换为 `***`，`JWT_SECRET` 只输出字符数，
+  敏感信息不落日志。
+
+### 变更
+
+- `.env-public` 示例容量参数按实测调整：`MIDDLEWARE_MAX_CONCURRENCY` 256→512、
+  `MIDDLEWARE_BACKPRESSURE_QUEUE` 256→512、`MIDDLEWARE_RATE_LIMIT_REQUESTS` 1000→8192；
+  代码默认值不变，`.env` 与 `.env-public` 已保持一致。
+
+### 文档
+
+- README 新增「启动配置日志」小节，并说明示例文件与代码默认值的差异。
+
 ## [0.4.0] - 2026-10-05
 
 集成生产环境可用的 HTTP 中间件栈：请求 ID / Trace / 安全响应头 / 背压 / 限流 / 超时 /
