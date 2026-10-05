@@ -114,9 +114,9 @@ fn valid_config_loads_with_defaults() {
 
             assert_eq!(config.middleware.request_timeout_secs, 10);
             assert_eq!(config.middleware.max_body_bytes, 2 * 1024 * 1024);
-            assert_eq!(config.middleware.max_concurrency, 256);
-            assert_eq!(config.middleware.backpressure_queue, 256);
-            assert_eq!(config.middleware.rate_limit_requests, 1000);
+            assert_eq!(config.middleware.max_concurrency, 512);
+            assert_eq!(config.middleware.backpressure_queue, 512);
+            assert_eq!(config.middleware.rate_limit_requests, 8192);
             assert_eq!(config.middleware.rate_limit_period_secs, 1);
             assert!(!config.middleware.hsts_enabled);
         },

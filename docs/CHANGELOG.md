@@ -19,13 +19,16 @@
 
 ### 变更
 
-- `.env-public` 示例容量参数按实测调整：`MIDDLEWARE_MAX_CONCURRENCY` 256→512、
+- `.env-public` 重命名为 `.env-example`（仍为入库的示例文件，用法不变：`cp .env-example .env`），
+  避免与「公开」语义混淆。
+- 中间件容量默认值与示例文件统一为按实测调整后的值：`MIDDLEWARE_MAX_CONCURRENCY` 256→512、
   `MIDDLEWARE_BACKPRESSURE_QUEUE` 256→512、`MIDDLEWARE_RATE_LIMIT_REQUESTS` 1000→8192；
-  代码默认值不变，`.env` 与 `.env-public` 已保持一致。
+  未显式配置这些环境变量时，代码兜底默认值与 `.env-example` 完全一致。
 
 ### 文档
 
-- README 新增「启动配置日志」小节，并说明示例文件与代码默认值的差异。
+- README 新增「启动配置日志」小节；「中间件配置」表格的默认值同步为 512 / 512 / 8192，
+  并说明默认值与 `.env-example` 保持一致。
 
 ## [0.4.0] - 2026-10-05
 
@@ -40,8 +43,8 @@ Body 限制 / 压缩，全部由 `tower::ServiceBuilder` 统一装配，参数�
   `ConcurrencyLimitLayer`）、限流链（`LoadShedLayer` + `BufferLayer` + `RateLimitLayer`）、
   `CompressionLayer`、`TimeoutLayer`、`RequestBodyLimitLayer`、`CorsLayer`。
 - **配置（`MiddlewareConfig`）**：`MIDDLEWARE_REQUEST_TIMEOUT_SECS`（10）、
-  `MIDDLEWARE_MAX_BODY_BYTES`（2 MiB）、`MIDDLEWARE_MAX_CONCURRENCY`（256）、
-  `MIDDLEWARE_BACKPRESSURE_QUEUE`（256）、`MIDDLEWARE_RATE_LIMIT_REQUESTS`（1000）、
+  `MIDDLEWARE_MAX_BODY_BYTES`（2 MiB）、`MIDDLEWARE_MAX_CONCURRENCY`（512）、
+  `MIDDLEWARE_BACKPRESSURE_QUEUE`（512）、`MIDDLEWARE_RATE_LIMIT_REQUESTS`（8192）、
   `MIDDLEWARE_RATE_LIMIT_PERIOD_SECS`（1）、`MIDDLEWARE_HSTS_ENABLED`（默认跟随 `APP_ENV`）；
   任一容量参数为 0 时启动失败。
 - **错误语义（`src/middleware/error_response.rs`）**：超时 408、Body 超限 413、
@@ -64,7 +67,7 @@ Body 限制 / 压缩，全部由 `tower::ServiceBuilder` 统一装配，参数�
 - **依赖**：`tower` 由 dev-dependencies 提升为正式依赖（`buffer`、`limit`、`load-shed`）；
   `tower-http` 追加 `limit`、`timeout`、`set-header`、`compression-gzip` 特性。
 - **配置结构**：`AppConfig` 新增 `middleware` 字段（结构体字面量构造会编译失败，测试已同步）。
-- `.env` / `.env-public` 新增 `MIDDLEWARE_*` 配置段。
+- `.env` / `.env-example` 新增 `MIDDLEWARE_*` 配置段。
 - 中间件栈包在整个 Router 外层而非 `Router::layer`，避免 `PathRouter::layer` 按路由复制
   有状态层导致全局并发/限流失效。
 

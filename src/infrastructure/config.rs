@@ -155,9 +155,9 @@ impl AppConfig {
         let middleware = MiddlewareConfig {
             request_timeout_secs: parse_env_or("MIDDLEWARE_REQUEST_TIMEOUT_SECS", 10_u64)?,
             max_body_bytes: parse_env_or("MIDDLEWARE_MAX_BODY_BYTES", 2 * 1024 * 1024_usize)?,
-            max_concurrency: parse_env_or("MIDDLEWARE_MAX_CONCURRENCY", 256_usize)?,
-            backpressure_queue: parse_env_or("MIDDLEWARE_BACKPRESSURE_QUEUE", 256_usize)?,
-            rate_limit_requests: parse_env_or("MIDDLEWARE_RATE_LIMIT_REQUESTS", 1000_u64)?,
+            max_concurrency: parse_env_or("MIDDLEWARE_MAX_CONCURRENCY", 512_usize)?,
+            backpressure_queue: parse_env_or("MIDDLEWARE_BACKPRESSURE_QUEUE", 512_usize)?,
+            rate_limit_requests: parse_env_or("MIDDLEWARE_RATE_LIMIT_REQUESTS", 8192_u64)?,
             rate_limit_period_secs: parse_env_or("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", 1_u64)?,
             hsts_enabled: parse_env_or(
                 "MIDDLEWARE_HSTS_ENABLED",

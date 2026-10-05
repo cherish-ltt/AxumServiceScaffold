@@ -243,7 +243,9 @@ msrv = "1.98.1"
   `fallback_service` 的 `Clone` 约束。Buffer 只是固定长度队列，克隆共享同一 worker，不增加并发度，
   也不得当作业务任务队列使用。
 - 容量参数只允许定义在 `MiddlewareConfig`（`src/infrastructure/config.rs`）并从 `.env` 读取；
-  中间件代码中不得出现字面量。新增参数必须同步 `.env`、`.env-public`、`tests/config_tests.rs`。
+  中间件代码中不得出现字面量。新增参数必须同步 `.env`、`.env-example`、`tests/config_tests.rs`。
+- 代码兜底默认值必须与 `.env-example` 保持一致（当前：并发 512、背压队列 512、限流 8192 req/s、
+  超时 10s、Body 2 MiB、周期 1s）；修改任一侧都必须同步另一侧与 README「中间件配置」表格。
 - 中间件的错误响应必须复用 `ApiResponse::error(status, message)`，与业务错误 `AppError`
   的响应格式保持一致；不要在中间件里手写 JSON。
 - 并发限制与限速是两个维度：并发限制约束在途请求数，限速约束单位时间请求数；

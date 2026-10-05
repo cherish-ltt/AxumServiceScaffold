@@ -275,15 +275,16 @@ src
 | --- | --- | --- |
 | `MIDDLEWARE_REQUEST_TIMEOUT_SECS` | `10` | 单请求整体超时（秒），超时返回 `408` |
 | `MIDDLEWARE_MAX_BODY_BYTES` | `2097152`（2 MiB） | 请求体上限，超限返回 `413` |
-| `MIDDLEWARE_MAX_CONCURRENCY` | `256` | 同时在途请求上限 |
-| `MIDDLEWARE_BACKPRESSURE_QUEUE` | `256` | 并发已满时允许排队的请求数，超出立即 `503` |
-| `MIDDLEWARE_RATE_LIMIT_REQUESTS` | `1000` | 每个限流周期允许的请求数，超出 `429` |
+| `MIDDLEWARE_MAX_CONCURRENCY` | `512` | 同时在途请求上限 |
+| `MIDDLEWARE_BACKPRESSURE_QUEUE` | `512` | 并发已满时允许排队的请求数，超出立即 `503` |
+| `MIDDLEWARE_RATE_LIMIT_REQUESTS` | `8192` | 每个限流周期允许的请求数，超出 `429` |
 | `MIDDLEWARE_RATE_LIMIT_PERIOD_SECS` | `1` | 限流周期长度（秒） |
 | `MIDDLEWARE_HSTS_ENABLED` | 跟随 `APP_ENV` | 生产环境默认下发 `HSTS`，开发环境默认关闭 |
 
 任一容量参数为 `0` 都会导致启动失败，避免「以为限制了其实没限制」。
 
-以上默认值适配「单实例 + SQLite/中小型数据库」的中等配置机器，上线前必须按压测结果调整：
+上表的默认值与 `.env-example` 示例文件一致，适配「单实例 + SQLite/中小型数据库」的中等配置
+机器；上线前必须按压测结果调整：
 
 - `MIDDLEWARE_MAX_CONCURRENCY`：由下游能承受的最大在途请求数决定，通常取压测中找到的
   「p99 开始明显劣化」并发点的 80%。
@@ -307,10 +308,9 @@ src
 - 打印时机在日志初始化之后、`Container::bootstrap` 之前（`src/main.rs`），
   因此数据库引导失败时也能看到配置快照。
 
-`.env-public` 是入库的示例文件，其中容量参数是按实测调过的示例值（`MIDDLEWARE_MAX_CONCURRENCY=512`、
-`MIDDLEWARE_BACKPRESSURE_QUEUE=512`、`MIDDLEWARE_RATE_LIMIT_REQUESTS=8192`）；
-上表的「默认值」指代码里 `MiddlewareConfig` 的兜底默认值（256 / 256 / 1000）。
-两者不一致时以启动日志打印的实际值为准。
+`.env-example` 是入库的示例文件，其中的容量参数与上表的默认值保持一致
+（`MIDDLEWARE_MAX_CONCURRENCY=512`、`MIDDLEWARE_BACKPRESSURE_QUEUE=512`、
+`MIDDLEWARE_RATE_LIMIT_REQUESTS=8192`）；两者不一致时以启动日志打印的实际值为准。
 
 ### 最小压测方法
 
@@ -509,13 +509,13 @@ let ok = verify_password("S3cure-Password!", &hashed)?;
 复制模板：
 
 ```bash
-cp .env-public .env
+cp .env-example .env
 ```
 
 PowerShell：
 
 ```powershell
-Copy-Item .env-public .env
+Copy-Item .env-example .env
 ```
 
 默认模板使用 SQLite：
@@ -538,7 +538,7 @@ cargo run
 POST /api/v1/auth/dev-login
 ```
 
-不要在生产环境使用 `.env-public` 中的示例 JWT 密钥；生产构建不会暴露调试登录接口。
+不要在生产环境使用 `.env-example` 中的示例 JWT 密钥；生产构建不会暴露调试登录接口。
 
 健康检查语义：
 
