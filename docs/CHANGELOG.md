@@ -5,6 +5,51 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+集成生产环境可用的 HTTP 中间件栈：请求 ID / Trace / 安全响应头 / 背压 / 限流 / 超时 /
+Body 限制 / 压缩，全部由 `tower::ServiceBuilder` 统一装配，参数集中在 `.env`。
+
+### 新增
+
+- **中间件栈（`src/middleware/stack.rs`）**：`middleware::apply(app, &config.middleware)` 用
+  `ServiceBuilder` 依次叠加 `SetRequestIdLayer`、`PropagateRequestIdLayer`、`TraceLayer`、
+  `SetMultipleResponseHeadersLayer`、背压三件套（`LoadShedLayer` + `BufferLayer` +
+  `ConcurrencyLimitLayer`）、限流链（`LoadShedLayer` + `BufferLayer` + `RateLimitLayer`）、
+  `CompressionLayer`、`TimeoutLayer`、`RequestBodyLimitLayer`、`CorsLayer`。
+- **配置（`MiddlewareConfig`）**：`MIDDLEWARE_REQUEST_TIMEOUT_SECS`（10）、
+  `MIDDLEWARE_MAX_BODY_BYTES`（2 MiB）、`MIDDLEWARE_MAX_CONCURRENCY`（256）、
+  `MIDDLEWARE_BACKPRESSURE_QUEUE`（256）、`MIDDLEWARE_RATE_LIMIT_REQUESTS`（1000）、
+  `MIDDLEWARE_RATE_LIMIT_PERIOD_SECS`（1）、`MIDDLEWARE_HSTS_ENABLED`（默认跟随 `APP_ENV`）；
+  任一容量参数为 0 时启动失败。
+- **错误语义（`src/middleware/error_response.rs`）**：超时 408、Body 超限 413、
+  限流 429、背压/overload 503，均复用 `ApiResponse` 结构。
+- **请求 ID 贯穿**：`x-request-id` 缺失时生成 UUID，存在时透传；写入响应头，
+  同时作为 `http_request` tracing span 的字段，handler 日志可与响应关联。
+- **安全响应头**：`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、
+  `Referrer-Policy: strict-origin-when-cross-origin`，生产环境额外下发 `HSTS`。
+- **测试**：`tests/middleware_tests.rs` 新增 7 个集成测试（超时 408、Body 413、限流 429、
+  背压 503 且不堆积、`request_id` 生成/透传、安全响应头与 HSTS 开关、gzip 压缩）；
+  `tests/middleware_log_tests.rs` 单独验证日志关联（`request_id` 出现在 `http_request` span）；
+  `tests/config_tests.rs` 新增 3 个配置测试（覆盖项、HSTS 默认值、容量参数为 0）；
+  `src/middleware/error_response.rs` 补充错误分支的单元测试（覆盖率 100%）。
+
+### 变更
+
+- `src/create_app.rs`：移除内联的 4 个 layer，改为 `middleware::apply`；
+  `create_app` 的签名与调用方式不变。
+- **依赖**：`tower` 由 dev-dependencies 提升为正式依赖（`buffer`、`limit`、`load-shed`）；
+  `tower-http` 追加 `limit`、`timeout`、`set-header`、`compression-gzip` 特性。
+- **配置结构**：`AppConfig` 新增 `middleware` 字段（结构体字面量构造会编译失败，测试已同步）。
+- `.env` / `.env-public` 新增 `MIDDLEWARE_*` 配置段。
+- 中间件栈包在整个 Router 外层而非 `Router::layer`，避免 `PathRouter::layer` 按路由复制
+  有状态层导致全局并发/限流失效。
+
+### 文档
+
+- README 新增「中间件栈」「中间件配置」「最小压测方法」章节。
+- AGENTS.md 新增「HTTP 中间件」规范（10.6）。
+
 ## [0.3.0] - 2026-09-27
 
 内置「启动事务 → 读写数据 → 提交事务」的完整示例：一次转账在一个事务内读账户、

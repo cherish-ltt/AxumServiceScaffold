@@ -227,6 +227,37 @@ msrv = "1.98.1"
 
 ---
 
+### 10.6 HTTP 中间件
+
+- 所有中间件集中在 `src/middleware/stack.rs`，用 `tower::ServiceBuilder` 一次装配，
+  通过 `middleware::apply(app, &config.middleware)` 实施；controller 与其他层不得再自行包中间件。
+- **中间件栈必须包在整个 Router 外层**（`apply` 返回 `Router::new().fallback_service(stack)`）。
+  禁止把有状态层（`ConcurrencyLimit`、`RateLimit`）交给 `Router::layer`：`PathRouter::layer`
+  会给每条路由复制一份 layer，全局语义会被放大成「每路由一份」。
+- `create_app` 的公开签名保持 `pub fn create_app(container: Arc<Container>) -> Router`，
+  中间件在函数内部施加，`main.rs` 与集成测试的调用方式不变。
+- Tower 的错误类型必须用 `axum::error_handling::HandleErrorLayer` 吸收（axum 要求 `Error = Infallible`），
+  处理函数写在与 `stack.rs` 同目录的 `error_response.rs` 中，类型下转用
+  `err.is::<tower::load_shed::error::Overloaded>()`。
+- 非 `Clone` 的 Tower service（如 `RateLimit`）用 `BufferLayer` 兜住以满足 `axum::serve` /
+  `fallback_service` 的 `Clone` 约束。Buffer 只是固定长度队列，克隆共享同一 worker，不增加并发度，
+  也不得当作业务任务队列使用。
+- 容量参数只允许定义在 `MiddlewareConfig`（`src/infrastructure/config.rs`）并从 `.env` 读取；
+  中间件代码中不得出现字面量。新增参数必须同步 `.env`、`.env-public`、`tests/config_tests.rs`。
+- 中间件的错误响应必须复用 `ApiResponse::error(status, message)`，与业务错误 `AppError`
+  的响应格式保持一致；不要在中间件里手写 JSON。
+- 并发限制与限速是两个维度：并发限制约束在途请求数，限速约束单位时间请求数；
+  两者均为**进程级**实现，多实例部署需在网关或共享存储层补齐分布式限流。
+- 调整执行顺序、新增或移除中间件时，必须同步更新 `README.md` 的「中间件栈」章节与
+  `docs/CHANGELOG.md`，并在 `tests/middleware_tests.rs` 补对应断言（至少覆盖超时、Body 超限、
+  背压 503、限流 429、`request_id` 关联）。
+- 需要断言日志内容的测试必须单独成进程（如 `tests/middleware_log_tests.rs`）：`tracing` 的
+  callsite interest 缓存是进程级的，其他测试线程若在没有订阅者时命中过 tower-http 的 span
+  callsite，该 callsite 会被缓存为 `never`，而 `tracing::subscriber::set_global_default` 并不重建
+  这个缓存（需显式调用 `tracing::callsite::rebuild_interest_cache()`）。
+- 依赖约束：`tower` 必须是正式依赖（`buffer`/`limit`/`load-shed`）；`tower-http` 需包含
+  `cors`、`trace`、`request-id`、`limit`、`timeout`、`set-header`、`compression-gzip`。
+
 **本文件是项目的“开发宪法”，所有 pull request 和代码审查均应参照其内容。**
 
 ## 10. 其他追加内容
