@@ -5,7 +5,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.4.0] - 2026-10-05
 
 集成生产环境可用的 HTTP 中间件栈：请求 ID / Trace / 安全响应头 / 背压 / 限流 / 超时 /
 Body 限制 / 压缩，全部由 `tower::ServiceBuilder` 统一装配，参数集中在 `.env`。
@@ -33,6 +33,7 @@ Body 限制 / 压缩，全部由 `tower::ServiceBuilder` 统一装配，参数�
   `tests/middleware_log_tests.rs` 单独验证日志关联（`request_id` 出现在 `http_request` span）；
   `tests/config_tests.rs` 新增 3 个配置测试（覆盖项、HSTS 默认值、容量参数为 0）；
   `src/middleware/error_response.rs` 补充错误分支的单元测试（覆盖率 100%）。
+  其后共 97 个测试通过，行覆盖率 97.16%（`cargo llvm-cov`）。
 
 ### 变更
 
