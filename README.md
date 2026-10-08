@@ -514,6 +514,59 @@ let ok = verify_password("S3cure-Password!", &hashed)?;
 
 这些库暂时不一定全部在业务里直接使用，但作为脚手架是合理的储备。
 
+## 贡献与使用本仓库
+
+从零开始参与本仓库开发或使用，按以下步骤操作：
+
+### 1. 克隆仓库
+
+```bash
+git clone git@github.com:cherish-ltt/AxumServiceScaffold.git
+cd AxumServiceScaffold
+```
+
+### 2. 初始化 Git 钩子
+
+仓库使用 `prek`（Rust 编写的 Git hook 管理器，`pre-commit` 的替代品）管理提交前检查，
+钩子配置见 `.pre-commit-config.yaml`：
+
+```bash
+prek init
+```
+
+执行后 `.git/hooks/pre-commit` 会安装钩子，之后每次 `git commit` 自动运行
+格式、lint、构建与测试检查；也可随时手动执行 `prek run --all-files` 全量扫描。
+
+### 3. 准备环境变量
+
+复制模板：
+
+```bash
+cp .env-example .env
+```
+
+默认模板使用 SQLite，无需额外安装数据库即可启动。
+
+### 4. 构建与验证
+
+```bash
+cargo build
+cargo test
+```
+
+### 5. 启动服务
+
+```bash
+cargo run
+```
+
+默认监听 `http://127.0.0.1:8080`，调试构建下可访问 `http://127.0.0.1:8080/swagger-ui`。
+
+### 6. 开发与提交
+
+- 提交信息遵循 [AGENTS.md](AGENTS.md) 的规范（`<type>: <中文描述>`，每次提交对应一个逻辑变更）
+- `git commit` 时钩子自动检查，全部通过后才能提交；如需提交到远程执行 `git push`
+
 ## 快速开始
 
 ### 1. 准备环境变量
@@ -667,11 +720,15 @@ cargo test --all-features
 所有变更必须通过以下检查后才能提交：
 
 ```bash
+prek run --all-files
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo build
 cargo test
 ```
+
+`prek run --all-files` 会按 `.pre-commit-config.yaml` 扫描全部文件（格式、
+lint、构建与测试）；`git commit` 时也会自动触发同样的钩子检查。
 
 单元测试覆盖率使用 `cargo llvm-cov` 检测，要求不低于 80%。
 

@@ -31,6 +31,9 @@
 
 ### 文档
 
+- README 新增「贡献与使用本仓库」章节：从 `git clone` → `prek init`（安装 Git 钩子，
+  配合 `.pre-commit-config.yaml`）→ `cp .env-example .env` → `cargo build`/`cargo test` →
+  `cargo run` 到提交与推送的完整上手步骤链。
 - README 新增「启动配置日志」小节；「中间件配置」表格的默认值同步为 256 / 256 / 32768，
   并说明默认值与 `.env-example` 保持一致。
 - README 新增「架构动效预览」小节：内嵌 `docs/live-panel/axum-service-scaffold.gif`（30 秒循环）
