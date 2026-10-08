@@ -25,13 +25,13 @@
 
 - `.env-public` 重命名为 `.env-example`（仍为入库的示例文件，用法不变：`cp .env-example .env`），
   避免与「公开」语义混淆。
-- 中间件容量默认值与示例文件统一为按实测调整后的值：`MIDDLEWARE_MAX_CONCURRENCY` 256→512、
-  `MIDDLEWARE_BACKPRESSURE_QUEUE` 256→512、`MIDDLEWARE_RATE_LIMIT_REQUESTS` 1000→8192；
+- 中间件容量默认值与示例文件统一为按实测调整后的值：`MIDDLEWARE_MAX_CONCURRENCY` 512→256、
+  `MIDDLEWARE_BACKPRESSURE_QUEUE` 512→256、`MIDDLEWARE_RATE_LIMIT_REQUESTS` 8192→32768；
   未显式配置这些环境变量时，代码兜底默认值与 `.env-example` 完全一致。
 
 ### 文档
 
-- README 新增「启动配置日志」小节；「中间件配置」表格的默认值同步为 512 / 512 / 8192，
+- README 新增「启动配置日志」小节；「中间件配置」表格的默认值同步为 256 / 256 / 32768，
   并说明默认值与 `.env-example` 保持一致。
 - README 新增「架构动效预览」小节：内嵌 `docs/live-panel/axum-service-scaffold.gif`（30 秒循环）
   并链接到 `docs/live-panel/axum-service-scaffold.mp4`，同时说明面板配置（`docs/live-panel/config.json`）

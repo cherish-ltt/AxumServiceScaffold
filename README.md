@@ -287,9 +287,9 @@ src
 | --- | --- | --- |
 | `MIDDLEWARE_REQUEST_TIMEOUT_SECS` | `10` | 单请求整体超时（秒），超时返回 `408` |
 | `MIDDLEWARE_MAX_BODY_BYTES` | `2097152`（2 MiB） | 请求体上限，超限返回 `413` |
-| `MIDDLEWARE_MAX_CONCURRENCY` | `512` | 同时在途请求上限 |
-| `MIDDLEWARE_BACKPRESSURE_QUEUE` | `512` | 并发已满时允许排队的请求数，超出立即 `503` |
-| `MIDDLEWARE_RATE_LIMIT_REQUESTS` | `8192` | 每个限流周期允许的请求数，超出 `429` |
+| `MIDDLEWARE_MAX_CONCURRENCY` | `256` | 同时在途请求上限 |
+| `MIDDLEWARE_BACKPRESSURE_QUEUE` | `256` | 并发已满时允许排队的请求数，超出立即 `503` |
+| `MIDDLEWARE_RATE_LIMIT_REQUESTS` | `32768` | 每个限流周期允许的请求数，超出 `429` |
 | `MIDDLEWARE_RATE_LIMIT_PERIOD_SECS` | `1` | 限流周期长度（秒） |
 | `MIDDLEWARE_HSTS_ENABLED` | 跟随 `APP_ENV` | 生产环境默认下发 `HSTS`，开发环境默认关闭 |
 
@@ -321,8 +321,8 @@ src
   因此数据库引导失败时也能看到配置快照。
 
 `.env-example` 是入库的示例文件，其中的容量参数与上表的默认值保持一致
-（`MIDDLEWARE_MAX_CONCURRENCY=512`、`MIDDLEWARE_BACKPRESSURE_QUEUE=512`、
-`MIDDLEWARE_RATE_LIMIT_REQUESTS=8192`）；两者不一致时以启动日志打印的实际值为准。
+（`MIDDLEWARE_MAX_CONCURRENCY=256`、`MIDDLEWARE_BACKPRESSURE_QUEUE=256`、
+`MIDDLEWARE_RATE_LIMIT_REQUESTS=32768`）；两者不一致时以启动日志打印的实际值为准。
 
 ### 最小压测方法
 
