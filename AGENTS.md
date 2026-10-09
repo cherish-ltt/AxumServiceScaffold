@@ -278,6 +278,14 @@ msrv = "1.99.0"
 - 依赖约束：`tracing-subscriber`、`tracing-appender` 为正式依赖，不得为分批写入引入
   额外的异步通道/缓冲依赖（用 `std::thread` + `std::sync::mpsc` 实现定时刷盘）。
 
+### 10.8 版本发布标签
+
+- 版本发布必须打 annotated tag（`git tag -a`），message 风格与历史保持一致
+  （如 `v0.4.0`/`v0.3.0`）：首行 `vX.Y.Z <一句功能标题>`，随后逐条列出本次主要变更，
+  末行 `详见 docs/CHANGELOG.md`。
+- 已推送的 tag 如需补充或修正 message，先删除本地与远程 tag 再重打重推
+  （`git tag -d` + `git push origin :refs/tags/<tag>`），避免 tag 内容与实际发布不符。
+
 **本文件是项目的“开发宪法”，所有 pull request 和代码审查均应参照其内容。**
 
 ## 10. 其他追加内容
