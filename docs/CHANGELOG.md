@@ -5,6 +5,20 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 文档
+
+- README 重构为简洁门面文档：只保留项目简介、架构总览与流程图、已内置能力清单、
+  文档导航、快速开始、默认接口、贡献指南与许可证；中间件栈与配置、事务示例、
+  统一响应结构、日志、测试与构建检查、扩展开发等详情内容拆分到 `docs/` 下独立 md
+  文件并通过链接跳转（`docs/ARCHITECTURE.md`、`docs/MIDDLEWARE.md`、
+  `docs/TRANSACTION.md`、`docs/RESPONSE.md`、`docs/LOGGING.md`、`docs/TESTING.md`、
+  `docs/DEVELOPMENT.md`）。图片、流程图、logo 与架构动效仍保留在 README。
+- AGENTS.md 中引用 README 章节的规范同步改为指向 `docs/` 下对应文档
+  （10.4 统一响应结构 → `docs/RESPONSE.md`；10.6 中间件栈/配置 → `docs/MIDDLEWARE.md`；
+  10.7 日志分批落盘 → `docs/LOGGING.md`）。
+
 ## [0.5.0] - 2026-10-09
 
 ### 变更

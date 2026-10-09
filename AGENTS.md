@@ -245,12 +245,12 @@ msrv = "1.99.0"
 - 容量参数只允许定义在 `MiddlewareConfig`（`src/infrastructure/config.rs`）并从 `.env` 读取；
   中间件代码中不得出现字面量。新增参数必须同步 `.env`、`.env-example`、`tests/config_tests.rs`。
 - 代码兜底默认值必须与 `.env-example` 保持一致（当前：并发 256、背压队列 256、限流 32768 req/s、
-  超时 10s、Body 2 MiB、周期 1s）；修改任一侧都必须同步另一侧与 README「中间件配置」表格。
+  超时 10s、Body 2 MiB、周期 1s）；修改任一侧都必须同步另一侧与 `docs/MIDDLEWARE.md` 的「中间件配置」表格。
 - 中间件的错误响应必须复用 `ApiResponse::error(status, message)`，与业务错误 `AppError`
   的响应格式保持一致；不要在中间件里手写 JSON。
 - 并发限制与限速是两个维度：并发限制约束在途请求数，限速约束单位时间请求数；
   两者均为**进程级**实现，多实例部署需在网关或共享存储层补齐分布式限流。
-- 调整执行顺序、新增或移除中间件时，必须同步更新 `README.md` 的「中间件栈」章节与
+- 调整执行顺序、新增或移除中间件时，必须同步更新 `docs/MIDDLEWARE.md` 的「中间件栈」章节与
   `docs/CHANGELOG.md`，并在 `tests/middleware_tests.rs` 补对应断言（至少覆盖超时、Body 超限、
   背压 503、限流 429、`request_id` 关联）。
 - 需要断言日志内容的测试必须单独成进程（如 `tests/middleware_log_tests.rs`）：`tracing` 的
@@ -273,8 +273,8 @@ msrv = "1.99.0"
   保证「条数」计数与日志行一一对应，禁止直接计数 fmt 层的分段写入。
 - 进程退出时必须停止定时刷盘线程并落盘剩余缓冲（`BatchGuard::drop`），不得丢日志。
 - 批量参数属于日志配置（`LoggingConfig`），走 `.env`；新增/调整时必须同步 `.env`、
-  `.env-example`、`tests/config_tests.rs`（默认值、覆盖项、0 值校验）、README「日志写入：分批落盘」
-  章节与 `docs/CHANGELOG.md`；任一项为 `0` 拒绝启动。
+  `.env-example`、`tests/config_tests.rs`（默认值、覆盖项、0 值校验）、`docs/LOGGING.md` 的
+  「日志写入：分批落盘」章节与 `docs/CHANGELOG.md`；任一项为 `0` 拒绝启动。
 - 依赖约束：`tracing-subscriber`、`tracing-appender` 为正式依赖，不得为分批写入引入
   额外的异步通道/缓冲依赖（用 `std::thread` + `std::sync::mpsc` 实现定时刷盘）。
 
@@ -322,7 +322,7 @@ msrv = "1.99.0"
 - controller 直接返回 `ApiResponse<T>`（已实现 `IntoResponse`），不要再手动包裹 `Json`。
 - `204 No Content` 等不带响应体的状态码不属于 `ApiResponse` 职责，由 handler 直接返回 `StatusCode`。
 - `domain` 层不引入 `http::StatusCode`，错误状态码仍以 `AppError::http_code() -> u16` 表达，在外层 `src/error.rs` 才映射为 `StatusCode`。
-- 修改响应结构时必须同步更新 `README.md` 的「统一响应结构」章节与 `docs/CHANGELOG.md`。
+- 修改响应结构时必须同步更新 `docs/RESPONSE.md` 的「统一响应结构」章节与 `docs/CHANGELOG.md`。
 
 ### 10.5 事务与持久化
 
