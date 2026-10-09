@@ -40,6 +40,33 @@
   并链接到 `docs/live-panel/axum-service-scaffold.mp4`，同时说明面板配置（`docs/live-panel/config.json`）
   与示意值范围。GitHub 渲染会剥离手写 `<video>` 标签，仓库相对路径的 mp4 无法内嵌播放，
   故动效用 GIF 内嵌，完整画质用 mp4 点击跳转。
+- README「构建检查」章节新增「HTTP 黑盒测试（`oneshot`）」小节：说明 `tests/api_tests.rs`
+  以 `tower::ServiceExt::oneshot` 驱动 `create_app` 产出的 `Router`、每测试独立容器与临时 SQLite 库、
+  `send` / `send_response` 的用法约定、`oneshot` 会消费 `Router` 需 `clone()`，
+  以及提取器错误响应不属于统一响应结构的边界。
+
+### 测试
+
+- **HTTP 接口黑盒测试扩充**：`tests/api_tests.rs` 新增 12 个用例、共 42 个测试，
+  全部通过 `tower::ServiceExt::oneshot` 把 `create_app` 产出的 `Router` 当作一次性 `Service` 驱动，
+  不直接调用 controller/service，也不监听真实端口：
+  - 统一响应结构：`success_response_follows_the_unified_envelope`、
+    `error_responses_follow_the_unified_envelope`（断言 `code` 与状态码一致、`message` 为非空字符串、
+    `timestamp` 为正毫秒值、`content-type: application/json`、错误响应不带 `data`）。
+  - 提取器与协议错误：`malformed_json_body_is_rejected_with_400`（400）、
+    `missing_json_content_type_is_rejected_with_415`（415）、
+    `json_body_missing_required_field_is_rejected_with_422`（422）、
+    `non_numeric_query_param_is_rejected_with_400`（400）、
+    `unsupported_method_returns_405_with_allow_header`（405 且 `allow: GET,HEAD`）、
+    `cors_preflight_is_allowed_for_every_origin`（预检 200 且放开来源与方法）。
+  - 鉴权：`transaction_endpoints_require_bearer_token`、
+    `malformed_authorization_header_is_rejected_with_401`（`Bearer` / `Bearer   ` 两种缺 token 写法）、
+    `expired_token_is_rejected_with_401`（同密钥签发、已过期 5 分钟）、
+    `dev_login_with_empty_roles_falls_back_to_default_role`（空 `roles` 回退为 `developer`）。
+  - 辅助：新增 `send_response`（取原始 `Response` 以断言响应头）、`read_json`、
+    `assert_unified_envelope` 与 `expired_token`。
+  - 提取器层失败（400/415/422）与 404/405 的响应由 axum 生成（纯文本或空体），
+    不属于统一响应结构，因此这些用例只锁定状态码契约。
 
 ## [0.4.0] - 2026-10-05
 
