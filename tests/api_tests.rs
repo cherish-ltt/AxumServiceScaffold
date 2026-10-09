@@ -2,13 +2,16 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Request, StatusCode, header};
+use axum::http::{HeaderMap, Request, StatusCode, header};
+use axum::response::Response;
 use axum_service_scaffold::container::Container;
 use axum_service_scaffold::create_app::create_app;
 use axum_service_scaffold::infrastructure::config::{
     AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, MiddlewareConfig, ServerConfig,
 };
+use chrono::{Duration, Utc};
 use http_body_util::BodyExt;
+use jsonwebtoken::{Algorithm, EncodingKey, Header as JwtHeader, encode};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use tracing_appender::rolling::Rotation;
@@ -72,17 +75,24 @@ async fn setup_app() -> Router {
     create_app(Arc::new(container))
 }
 
-async fn send(app: Router, request: Request<Body>) -> (StatusCode, Value) {
-    let response = app.oneshot(request).await.expect("请求应成功返回");
-    let status = response.status();
+async fn send_response(app: Router, request: Request<Body>) -> Response {
+    app.oneshot(request).await.expect("请求应成功返回")
+}
+
+async fn read_json(response: Response) -> Value {
     let bytes = response
         .into_body()
         .collect()
         .await
         .expect("响应体可读取")
         .to_bytes();
-    let json = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-    (status, json)
+    serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+}
+
+async fn send(app: Router, request: Request<Body>) -> (StatusCode, Value) {
+    let response = send_response(app, request).await;
+    let status = response.status();
+    (status, read_json(response).await)
 }
 
 fn get(uri: &str) -> Request<Body> {
@@ -666,4 +676,246 @@ async fn unknown_transfer_record_returns_404() {
     .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// 统一响应结构：`code` 派生自 HTTP 状态码，`message` 与 `timestamp` 恒定存在，响应体固定为 JSON。
+fn assert_unified_envelope(status: StatusCode, headers: &HeaderMap, body: &Value) {
+    assert_eq!(
+        body["code"].as_u64(),
+        Some(u64::from(status.as_u16())),
+        "code 应与 HTTP 状态码一致: {body}"
+    );
+    assert!(body["message"].is_string(), "message 应为字符串: {body}");
+    assert!(
+        body["timestamp"].as_i64().is_some_and(|value| value > 0),
+        "timestamp 应为毫秒时间戳: {body}"
+    );
+    assert_eq!(
+        headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json"),
+        "统一响应结构应为 JSON: {headers:?}"
+    );
+}
+
+#[tokio::test]
+async fn success_response_follows_the_unified_envelope() {
+    let app = setup_app().await;
+    let response = send_response(app, get("/")).await;
+    let status = response.status();
+    let headers = response.headers().clone();
+    let body = read_json(response).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_unified_envelope(status, &headers, &body);
+}
+
+#[tokio::test]
+async fn error_responses_follow_the_unified_envelope() {
+    let app = setup_app().await;
+    let token = issue_dev_token(&app).await;
+    let cases = [
+        (StatusCode::BAD_REQUEST, get("/api/v1/examples?page=0")),
+        (StatusCode::UNAUTHORIZED, get("/api/v1/auth/me")),
+        (
+            StatusCode::NOT_FOUND,
+            get_with_bearer("/api/v1/transactions/missing-record", &token),
+        ),
+    ];
+
+    for (expected, request) in cases {
+        let response = send_response(app.clone(), request).await;
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = read_json(response).await;
+
+        assert_eq!(status, expected, "响应状态码不符: {body}");
+        assert_unified_envelope(status, &headers, &body);
+        assert!(body.get("data").is_none(), "错误响应不应带 data: {body}");
+    }
+}
+
+/// 请求体解析失败由提取器直接拒绝，响应是 axum 产生的纯文本，这里只锁定状态码契约。
+#[tokio::test]
+async fn malformed_json_body_is_rejected_with_400() {
+    let app = setup_app().await;
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/examples/echo")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from("{not json}"))
+        .expect("构造请求");
+
+    assert_eq!(send(app, request).await.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn missing_json_content_type_is_rejected_with_415() {
+    let app = setup_app().await;
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/examples/echo")
+        .body(Body::from(r#"{"title":"x"}"#))
+        .expect("构造请求");
+
+    assert_eq!(
+        send(app, request).await.0,
+        StatusCode::UNSUPPORTED_MEDIA_TYPE
+    );
+}
+
+#[tokio::test]
+async fn json_body_missing_required_field_is_rejected_with_422() {
+    let app = setup_app().await;
+    let (status, _) = send(app, post_json("/api/v1/examples/echo", json!({}))).await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn non_numeric_query_param_is_rejected_with_400() {
+    let app = setup_app().await;
+    let (status, _) = send(app, get("/api/v1/examples?size=abc")).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn unsupported_method_returns_405_with_allow_header() {
+    let app = setup_app().await;
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/v1/system/health")
+        .body(Body::empty())
+        .expect("构造请求");
+    let response = send_response(app, request).await;
+
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::ALLOW)
+            .and_then(|value| value.to_str().ok()),
+        Some("GET,HEAD")
+    );
+}
+
+#[tokio::test]
+async fn cors_preflight_is_allowed_for_every_origin() {
+    let app = setup_app().await;
+    let request = Request::builder()
+        .method("OPTIONS")
+        .uri("/api/v1/examples/echo")
+        .header(header::ORIGIN, "https://example.com")
+        .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+        .body(Body::empty())
+        .expect("构造请求");
+    let response = send_response(app, request).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers();
+    assert_eq!(
+        headers
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some("*")
+    );
+    assert_eq!(
+        headers
+            .get(header::ACCESS_CONTROL_ALLOW_METHODS)
+            .and_then(|value| value.to_str().ok()),
+        Some("*")
+    );
+}
+
+#[tokio::test]
+async fn transaction_endpoints_require_bearer_token() {
+    let app = setup_app().await;
+
+    for uri in ["/api/v1/transactions", "/api/v1/transactions/any-record"] {
+        let (status, body) = send(app.clone(), get(uri)).await;
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{uri}");
+        assert_eq!(body["code"], 401, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn malformed_authorization_header_is_rejected_with_401() {
+    let app = setup_app().await;
+
+    for value in ["Bearer", "Bearer   "] {
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/v1/auth/me")
+            .header(header::AUTHORIZATION, value)
+            .body(Body::empty())
+            .expect("构造请求");
+        let (status, body) = send(app.clone(), request).await;
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{value}");
+        assert!(
+            body["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("Bearer <token>")),
+            "{value} 应提示 Bearer 格式: {body}"
+        );
+    }
+}
+
+/// 与 `JwtService` 同密钥、同签发方签发的令牌，但已过期 5 分钟（jsonwebtoken 默认 60 秒 leeway）。
+fn expired_token() -> String {
+    let now = Utc::now();
+    let claims = json!({
+        "sub": "expired-user",
+        "username": "expired",
+        "roles": ["developer"],
+        "iss": "test-issuer",
+        "aud": "test-audience",
+        "iat": (now - Duration::minutes(10)).timestamp() as usize,
+        "exp": (now - Duration::minutes(5)).timestamp() as usize,
+    });
+
+    encode(
+        &JwtHeader::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+    )
+    .expect("签发过期令牌")
+}
+
+#[tokio::test]
+async fn expired_token_is_rejected_with_401() {
+    let app = setup_app().await;
+    let (status, body) = send(app, get_with_bearer("/api/v1/auth/me", &expired_token())).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(
+        body["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("已过期")),
+        "过期令牌应给出可读原因: {body}"
+    );
+}
+
+#[tokio::test]
+async fn dev_login_with_empty_roles_falls_back_to_default_role() {
+    let app = setup_app().await;
+    let (status, body) = send(
+        app.clone(),
+        post_json(
+            "/api/v1/auth/dev-login",
+            json!({ "username": "demo-admin", "roles": [] }),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let token = body["data"]["access_token"]
+        .as_str()
+        .expect("应返回访问令牌");
+
+    let (status, me) = send(app, get_with_bearer("/api/v1/auth/me", token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["data"]["roles"], json!(["developer"]));
 }
