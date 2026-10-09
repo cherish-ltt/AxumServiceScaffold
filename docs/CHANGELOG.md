@@ -5,13 +5,23 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.5.0] - 2026-10-09
 
 ### 变更
 
 - 依赖版本升级：`tokio` 1.53.1→1.53.2、`sea-orm` 2.0.3→2.0.4、`uuid` 1.26.1→1.27.0。
+- 限流（`429`）与背压（`503`）拒绝请求时不再逐条打印 `warn` 日志
+  （`src/middleware/error_response.rs`）：这两类拒绝总是批量出现，逐条告警无信息量；
+  每次请求仍由 `TraceLayer` 以 INFO 记录 method / uri / status。
 
 ### 新增
+
+- **日志分批写入**：文件日志改为内存缓冲批量落盘（`src/logging.rs`，`BatchFileWriter` /
+  `BatchGuard`），满 `LOG_BATCH_MAX_EVENTS`（默认 50）条或每 `LOG_BATCH_FLUSH_INTERVAL_SECS`
+  （默认 3）秒写一次文件，降低高频场景下逐条写文件的 CPU 开销；控制台层保持实时输出，
+  进程退出时落盘剩余缓冲。新增环境变量：`LOG_BATCH_MAX_EVENTS`、`LOG_BATCH_FLUSH_INTERVAL_SECS`
+  （任一为 0 拒绝启动），`.env`、`.env-example`、`tests/config_tests.rs`、
+  `tests/logging_batch_tests.rs` 同步更新。
 
 - **启动配置快照**：`logging::log_startup_config`（`src/logging.rs`）在启动时按
   「应用 / 服务 / 数据库 / JWT / 日志 / 中间件」六组结构化打印本次生效的配置；

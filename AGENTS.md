@@ -74,7 +74,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.98.1"
+          toolchain: "1.99.0"
           components: rustfmt, clippy
 
       - name: Show rustup info
@@ -105,7 +105,7 @@ jobs:
   - `name`、`version`、`edition`、`authors`、`description`、`license`、`repository` 等。
 - 依赖项必须**归类**，使用 `#` 注释说明每组依赖的用途。
 - 每个依赖必须使用 `version = "x.y.z"` **锁定具体版本**（使用 `=` 号），不得使用范围限定符。
-- 使用 `edition = "2024"` 以及环境中的 Rust 版本，例如:`rust-version = "1.95"`
+- 使用 `edition = "2024"` 以及环境中的 Rust 版本，例如:`rust-version = "1.99.0"`
 
 示例结构：
 
@@ -114,7 +114,7 @@ jobs:
 name = "my_crate"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95"
+rust-version = "1.99.0"
 authors = ["Your Name <email@example.com>"]
 description = "A short description"
 license = "MIT OR Apache-2.0"
@@ -170,7 +170,7 @@ cognitive-complexity-threshold = 15
 too-many-arguments-threshold = 5
 too-many-lines-threshold = 30
 allow-unwrap-in-tests = true
-msrv = "1.98.1"
+msrv = "1.99.0"
 ```
 
 所有代码必须通过 `cargo clippy --all-targets -- -D warnings` 检查，无警告。
@@ -220,7 +220,7 @@ msrv = "1.98.1"
 
 - **保持本文件（AGENTS.md）更新**：每次修正代码或引入新规范后，请同步更新此文档。
 - **所有变更**必须通过 CI 检查（格式、lint、构建、测试）。
-- **版本锁定**：工具链版本统一使用环境中的版本，但需>=1.98.1（如 CI 和 clippy 配置所示）。
+- **版本锁定**：工具链版本统一使用环境中的版本，但需>=1.99.0（如 CI 和 clippy 配置所示）。
 - **遵循设计**：改动必须遵循原有结构设计，不得私自添加和修改，除非用户发出明确重构指令。
 - **后续开发追加 AGENTS.md 内容**：写入第 10 章节。
 - **测试**：编写单元测试，如果已经安装`cargo-llvm-cov`则检测测试覆盖率>=80%。
@@ -259,6 +259,24 @@ msrv = "1.98.1"
   这个缓存（需显式调用 `tracing::callsite::rebuild_interest_cache()`）。
 - 依赖约束：`tower` 必须是正式依赖（`buffer`/`limit`/`load-shed`）；`tower-http` 需包含
   `cors`、`trace`、`request-id`、`limit`、`timeout`、`set-header`、`compression-gzip`。
+- 限流（`429`）与背压（`503`）触发时是批量拒绝，逐条告警无信息量：
+  `src/middleware/error_response.rs` 不得为这两类拒绝打印逐条 `warn` 日志，
+  每次请求（含被拒绝的请求）由 `TraceLayer` 的访问日志（INFO）覆盖；
+  `internal()` 等真正的内部错误仍须保留 `error!` 日志。
+
+### 10.7 日志分批写入
+
+- 文件日志采用内存缓冲分批落盘（`src/logging.rs` 的 `BatchFileWriter` / `BatchGuard`）：
+  满 `LOG_BATCH_MAX_EVENTS`（默认 50）条或每 `LOG_BATCH_FLUSH_INTERVAL_SECS`（默认 3）秒
+  落盘一次，降低高频场景下逐条写文件的 CPU 开销；控制台层保持实时输出，不得加入缓冲。
+- 每条日志必须先格式化为完整一行再写入缓冲（`LineFormat` 包一层 `FormatEvent`），
+  保证「条数」计数与日志行一一对应，禁止直接计数 fmt 层的分段写入。
+- 进程退出时必须停止定时刷盘线程并落盘剩余缓冲（`BatchGuard::drop`），不得丢日志。
+- 批量参数属于日志配置（`LoggingConfig`），走 `.env`；新增/调整时必须同步 `.env`、
+  `.env-example`、`tests/config_tests.rs`（默认值、覆盖项、0 值校验）、README「日志写入：分批落盘」
+  章节与 `docs/CHANGELOG.md`；任一项为 `0` 拒绝启动。
+- 依赖约束：`tracing-subscriber`、`tracing-appender` 为正式依赖，不得为分批写入引入
+  额外的异步通道/缓冲依赖（用 `std::thread` + `std::sync::mpsc` 实现定时刷盘）。
 
 **本文件是项目的“开发宪法”，所有 pull request 和代码审查均应参照其内容。**
 

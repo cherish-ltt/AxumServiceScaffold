@@ -324,6 +324,25 @@ src
 （`MIDDLEWARE_MAX_CONCURRENCY=256`、`MIDDLEWARE_BACKPRESSURE_QUEUE=256`、
 `MIDDLEWARE_RATE_LIMIT_REQUESTS=32768`）；两者不一致时以启动日志打印的实际值为准。
 
+### 日志写入：分批落盘
+
+文件日志采用分批写入（`src/logging.rs`）：事件先进入内存缓冲，满 `LOG_BATCH_MAX_EVENTS`
+条或每 `LOG_BATCH_FLUSH_INTERVAL_SECS` 秒落盘一次，避免高频场景下逐条写文件浪费 CPU；
+控制台层保持实时输出。参数在 `.env` 配置，默认值见下表：
+
+| 变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| `LOG_BATCH_MAX_EVENTS` | `50` | 缓冲满 N 条触发一次落盘 |
+| `LOG_BATCH_FLUSH_INTERVAL_SECS` | `3` | 距上次落盘超过 N 秒强制落盘一次 |
+
+- 任一项设为 `0` 都会导致启动失败（参数必须大于 0）；
+- 进程退出时（`BatchGuard` drop）会停止定时刷盘线程并落盘剩余缓冲，不会丢日志；
+- 每条日志先格式化为完整一行再写入缓冲，保证「条数」计数与日志行一一对应。
+
+限流（`429`）与背压（`503`）触发时是批量拒绝，逐条告警日志没有信息量，`src/middleware/error_response.rs`
+不再为这两类拒绝打日志；每次请求（含被拒绝的请求）仍由中间件栈里的 `TraceLayer` 以
+INFO 级别记录 method / uri / status，需要排查风暴时可查访问日志或用 `LOG_FILTER` 调整级别。
+
 ### 最小压测方法
 
 先确认并发上限，再确定限速额度。以 [oha](https://github.com/hatoo/oha) 为例：
