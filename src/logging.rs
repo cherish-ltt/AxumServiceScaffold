@@ -1,10 +1,23 @@
+use std::{
+    io::{self, Write},
+    sync::{Arc, Mutex, mpsc},
+    thread::{self, JoinHandle},
+    time::Duration,
+};
+
 use anyhow::{Context, Result};
 use time::{UtcOffset, macros::format_description};
-use tracing_appender::{non_blocking::WorkerGuard, rolling::RollingFileAppender};
+use tracing::{Event, Subscriber};
+use tracing_appender::rolling::RollingFileAppender;
 use tracing_subscriber::{
     EnvFilter,
-    fmt::{self, time::OffsetTime},
+    fmt::{
+        self, FmtContext, FormatFields, MakeWriter,
+        format::{Format, FormatEvent, Full, Writer},
+        time::{FormatTime, OffsetTime},
+    },
     layer::SubscriberExt,
+    registry::LookupSpan,
     util::SubscriberInitExt,
 };
 
@@ -13,7 +26,11 @@ use crate::infrastructure::config::AppConfig;
 /// 初始化全局日志。
 ///
 /// 日志初始化应尽量早，这样启动阶段的配置错误与数据库错误也能被记录下来。
-pub fn init(config: &AppConfig) -> Result<WorkerGuard> {
+///
+/// 文件层采用分批写入：事件先进入内存缓冲，满 `LOG_BATCH_MAX_EVENTS` 条或每
+/// `LOG_BATCH_FLUSH_INTERVAL_SECS` 秒落盘一次，避免高频场景下逐条写文件浪费 CPU；
+/// 控制台层保持实时输出。返回的 `BatchGuard` 在 drop 时停止刷盘线程并落盘剩余缓冲。
+pub fn init(config: &AppConfig) -> Result<BatchGuard> {
     // 1. 配置时区和时间格式（东八区 UTC+8）
     let offset = UtcOffset::from_hms(
         config.logging.utc_offset_hour,
@@ -40,18 +57,26 @@ pub fn init(config: &AppConfig) -> Result<WorkerGuard> {
         // .latest_symlink("app.latest.log") // 需要对应平台权限
         .build(config.logging.out_dir.clone())
         .context("创建日志文件 appender 失败")?;
-    let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
-    // 3. 配置格式化层（输出到文件）
+    // 3. 配置格式化层（输出到文件，分批写入）
+    let file_writer = BatchFileWriter::new(
+        file_appender,
+        config.logging.batch_max_events,
+        Duration::from_secs(config.logging.batch_flush_interval_secs),
+    );
     let fmt_layer = fmt::layer()
-        .with_writer(file_writer)
-        .with_ansi(false)
-        .with_timer(timer.clone()); // 关闭文件中的 ANSI 颜色码（避免乱码）
+        // 先格式化整行再写入，保证每条日志恰好触发一次底层写入，分批计数才精确
+        .event_format(LineFormat::new(
+            fmt::format()
+                .with_ansi(false) // 关闭文件中的 ANSI 颜色码（避免乱码）
+                .with_timer(timer.clone()),
+        ))
+        .with_writer(file_writer.clone());
 
-    // 4.控制台输出层（带颜色）
+    // 4. 控制台输出层（带颜色，实时输出）
     let console_layer = fmt::layer().with_writer(std::io::stdout).with_timer(timer);
 
-    // 5.配置日志过滤级别（来自.env）
+    // 5. 配置日志过滤级别（来自 .env）
     let env_filter = EnvFilter::try_new(config.logging.filter.clone())
         .unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"));
 
@@ -63,7 +88,8 @@ pub fn init(config: &AppConfig) -> Result<WorkerGuard> {
         .try_init()
         .context("初始化全局日志订阅者失败")?;
 
-    Ok(guard)
+    // 7. 启动定时刷盘线程
+    Ok(file_writer.start_flusher())
 }
 
 /// 打印本次启动实际生效的配置，便于事后追溯启动那一刻的参数。
@@ -104,6 +130,8 @@ pub fn log_startup_config(config: &AppConfig) {
         filename_suffix = %logger.filename_suffix,
         rotation = ?logger.rotation,
         max_log_files = logger.max_log_files,
+        batch_max_events = logger.batch_max_events,
+        batch_flush_interval_secs = logger.batch_flush_interval_secs,
         "启动配置: 日志"
     );
     tracing::info!(
@@ -118,7 +146,150 @@ pub fn log_startup_config(config: &AppConfig) {
     );
 }
 
-/// 隐藏连接串里的口令，保留其余结构以便核对目标库。
+/// 把默认 `Format` 的输出先聚合成一行再交给底层 writer。
+///
+/// tracing 的 fmt 层对一条事件会多次调用 writer（时间戳、级别、字段等分段写入），
+/// 直接计数会失真；这里先格式化为完整一行，保证每次事件恰好触发一次 `write`，
+/// 分批写入器才能以「条数」精确触发落盘。
+#[derive(Clone)]
+struct LineFormat<T>(Format<Full, T>);
+
+impl<T> LineFormat<T> {
+    fn new(inner: Format<Full, T>) -> Self {
+        Self(inner)
+    }
+}
+
+impl<S, T, N> FormatEvent<S, N> for LineFormat<T>
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+    T: FormatTime,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &Event<'_>,
+    ) -> std::fmt::Result {
+        let mut line = String::new();
+        self.0.format_event(ctx, Writer::new(&mut line), event)?;
+        writer.write_str(&line)
+    }
+}
+
+/// 文件日志分批写入器：事件先进入内存缓冲，满 `batch_max_events` 条或每
+/// `flush_interval` 秒写一次文件，降低高频场景下逐条写文件的 CPU 开销。
+///
+/// 实现 `MakeWriter` 供 tracing fmt 层使用；每次事件由 `make_writer` 创建
+/// 一个 [`BatchWriter`] 追加缓冲。
+#[derive(Clone)]
+pub struct BatchFileWriter {
+    inner: Arc<Mutex<RollingFileAppender>>,
+    state: Arc<Mutex<BatchState>>,
+    batch_max_events: usize,
+    flush_interval: Duration,
+}
+
+/// 批量缓冲状态：已格式化的日志字节与累计事件条数。
+#[derive(Default)]
+struct BatchState {
+    buf: Vec<u8>,
+    events: usize,
+}
+
+impl BatchFileWriter {
+    fn new(inner: RollingFileAppender, batch_max_events: usize, flush_interval: Duration) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(inner)),
+            state: Arc::new(Mutex::new(BatchState::default())),
+            batch_max_events,
+            flush_interval,
+        }
+    }
+
+    /// 把缓冲内容一次性写入文件并清空。
+    fn flush(&self) -> io::Result<()> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.buf.is_empty() {
+            return Ok(());
+        }
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.write_all(&state.buf)?;
+        inner.flush()?;
+        state.buf.clear();
+        state.events = 0;
+        Ok(())
+    }
+
+    /// 启动后台定时刷盘线程，返回持有停止信号与线程句柄的 guard。
+    fn start_flusher(&self) -> BatchGuard {
+        let (stop, rx) = mpsc::channel::<()>();
+        let flusher = self.clone();
+        let interval = flusher.flush_interval;
+        let thread = thread::spawn(move || {
+            while rx.recv_timeout(interval).is_err() {
+                let _ = flusher.flush();
+            }
+        });
+        BatchGuard {
+            stop: Some(stop),
+            thread: Some(thread),
+            writer: self.clone(),
+        }
+    }
+}
+
+impl<'a> MakeWriter<'a> for BatchFileWriter {
+    type Writer = BatchWriter;
+
+    fn make_writer(&self) -> Self::Writer {
+        BatchWriter(self.clone())
+    }
+}
+
+/// 每次事件由 fmt 层创建一次；`write` 追加到共享缓冲，满 `batch_max_events` 条时落盘。
+pub struct BatchWriter(BatchFileWriter);
+
+impl Write for BatchWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.buf.extend_from_slice(buf);
+        state.events += 1;
+        if state.events >= self.0.batch_max_events {
+            drop(state);
+            self.0.flush()?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+/// `init` 返回的守卫：drop 时停止定时刷盘线程并落盘剩余缓冲。
+pub struct BatchGuard {
+    stop: Option<mpsc::Sender<()>>,
+    thread: Option<JoinHandle<()>>,
+    writer: BatchFileWriter,
+}
+
+impl Drop for BatchGuard {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        if let Err(e) = self.writer.flush() {
+            tracing::error!("日志守卫退出时落盘失败: {e}");
+        }
+    }
+}
+
+/// 隐藏连接串里的口令，保留其余结构以便核对目标库。，保留其余结构以便核对目标库。
 ///
 /// 同时处理 `scheme://user:password@host/db` 与 `scheme://host/db?password=xxx`
 /// 两种写法：前者按最后一个 `@` 切分（口令里含 `@` 或 `:` 时也不会漏出），

@@ -59,6 +59,8 @@ async fn setup_app() -> Router {
             rotation: Rotation::NEVER,
             max_log_files: 1,
             out_dir: std::env::temp_dir().to_string_lossy().to_string(),
+            batch_max_events: 50,
+            batch_flush_interval_secs: 3,
         },
         middleware: MiddlewareConfig {
             request_timeout_secs: 10,

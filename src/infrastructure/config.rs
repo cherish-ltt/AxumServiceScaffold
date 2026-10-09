@@ -58,6 +58,10 @@ pub struct LoggingConfig {
     pub rotation: Rotation,
     pub max_log_files: usize,
     pub out_dir: String,
+    /// 文件日志批量落盘：缓冲满 N 条触发一次写入。
+    pub batch_max_events: usize,
+    /// 文件日志批量落盘：最长 N 秒强制写入一次。
+    pub batch_flush_interval_secs: u64,
 }
 
 /// HTTP 中间件容量参数，全部集中在 `.env`，业务代码不得内联这些数字。
@@ -133,6 +137,12 @@ impl AppConfig {
             return Err(anyhow!("LOG_MAX_LOG_FILES 必须大于 0"));
         }
 
+        let batch_max_events = parse_env_or("LOG_BATCH_MAX_EVENTS", 50_usize)?;
+        let batch_flush_interval_secs = parse_env_or("LOG_BATCH_FLUSH_INTERVAL_SECS", 3_u64)?;
+        if batch_max_events == 0 || batch_flush_interval_secs == 0 {
+            return Err(anyhow!("日志批量参数必须大于 0"));
+        }
+
         let logging = LoggingConfig {
             filter: get_env_or("LOG_FILTER", "info,tower_http=info"),
             utc_offset_hour: parse_env_or("LOG_UTC_OFFSET_HOUR", 0_i8)?,
@@ -150,6 +160,8 @@ impl AppConfig {
             },
             max_log_files,
             out_dir: get_env_or("LOG_OUT_DIR", "/var/log/axum-app"),
+            batch_max_events,
+            batch_flush_interval_secs,
         };
 
         let middleware = MiddlewareConfig {

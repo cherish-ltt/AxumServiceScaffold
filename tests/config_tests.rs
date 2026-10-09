@@ -81,6 +81,8 @@ fn valid_config_loads_with_defaults() {
             ("LOG_ROTATION", None),
             ("LOG_MAX_LOG_FILES", None),
             ("LOG_OUT_DIR", None),
+            ("LOG_BATCH_MAX_EVENTS", None),
+            ("LOG_BATCH_FLUSH_INTERVAL_SECS", None),
             ("MIDDLEWARE_REQUEST_TIMEOUT_SECS", None),
             ("MIDDLEWARE_MAX_BODY_BYTES", None),
             ("MIDDLEWARE_MAX_CONCURRENCY", None),
@@ -110,6 +112,8 @@ fn valid_config_loads_with_defaults() {
             assert_eq!(config.logging.filename_suffix, "log");
             assert_eq!(config.logging.max_log_files, 30);
             assert_eq!(config.logging.out_dir, "/var/log/axum-app");
+            assert_eq!(config.logging.batch_max_events, 50);
+            assert_eq!(config.logging.batch_flush_interval_secs, 3);
             assert!(rotation_debug(&config.logging.rotation).contains("daily"));
 
             assert_eq!(config.middleware.request_timeout_secs, 10);
@@ -135,6 +139,8 @@ fn custom_overrides_are_applied() {
             ("DATABASE_SQLX_LOGGING", Some("true")),
             ("LOG_ROTATION", Some("HOURLY")),
             ("LOG_MAX_LOG_FILES", Some("7")),
+            ("LOG_BATCH_MAX_EVENTS", Some("100")),
+            ("LOG_BATCH_FLUSH_INTERVAL_SECS", Some("5")),
         ],
         || {
             let config = AppConfig::from_env().expect("自定义配置应可加载");
@@ -145,6 +151,8 @@ fn custom_overrides_are_applied() {
             assert_eq!(config.jwt.access_token_ttl_minutes, 30);
             assert!(config.database.sqlx_logging);
             assert_eq!(config.logging.max_log_files, 7);
+            assert_eq!(config.logging.batch_max_events, 100);
+            assert_eq!(config.logging.batch_flush_interval_secs, 5);
             assert!(rotation_debug(&config.logging.rotation).contains("hourly"));
         },
     );
@@ -286,6 +294,22 @@ fn zero_idle_timeout_is_rejected() {
             assert!(error.to_string().contains("超时必须大于 0"));
         },
     );
+}
+
+#[test]
+fn zero_batch_params_are_rejected() {
+    for key in ["LOG_BATCH_MAX_EVENTS", "LOG_BATCH_FLUSH_INTERVAL_SECS"] {
+        with_env(
+            &[("JWT_SECRET", Some(CUSTOM_SECRET)), (key, Some("0"))],
+            || {
+                let error = AppConfig::from_env().expect_err("批量参数为 0 应被拒绝");
+                assert!(
+                    error.to_string().contains("日志批量参数必须大于 0"),
+                    "{key} 的报错信息不符合预期: {error}"
+                );
+            },
+        );
+    }
 }
 
 #[test]

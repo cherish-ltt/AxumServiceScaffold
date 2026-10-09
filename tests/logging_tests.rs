@@ -39,6 +39,8 @@ fn test_config(out_dir: &str, utc_offset_hour: i8, utc_offset_minute: i8) -> App
             rotation: Rotation::NEVER,
             max_log_files: 2,
             out_dir: out_dir.to_string(),
+            batch_max_events: 50,
+            batch_flush_interval_secs: 3,
         },
         middleware: MiddlewareConfig {
             request_timeout_secs: 10,
@@ -58,7 +60,10 @@ fn logging_init_creates_log_file_in_configured_dir() {
     std::fs::create_dir_all(&out_dir).expect("创建临时日志目录");
 
     let config = test_config(&out_dir.to_string_lossy(), 8, 0);
-    let guard = logging::init(&config).expect("日志初始化应成功");
+    let guard = match logging::init(&config) {
+        Ok(guard) => guard,
+        Err(e) => panic!("日志初始化应成功: {e}"),
+    };
 
     tracing::info!("logging 初始化测试日志");
     drop(guard);
@@ -76,6 +81,9 @@ fn logging_init_rejects_invalid_utc_offset() {
     // time crate 的 UtcOffset 分量合法范围为 ±25 小时、±59 分秒，99 分钟必然非法。
     let config = test_config("/tmp/axum-scaffold-invalid-offset", 0, 99);
 
-    let error = logging::init(&config).expect_err("非法时区偏移应被拒绝");
+    let error = match logging::init(&config) {
+        Ok(_) => panic!("非法时区偏移应被拒绝"),
+        Err(e) => e,
+    };
     assert!(error.to_string().contains("日志时区偏移配置无效"));
 }
