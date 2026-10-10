@@ -101,6 +101,7 @@ pub fn log_startup_config(config: &AppConfig) {
     let equals = format!("+{}+", "=".repeat(WIDTH));
     let dashes = format!("+{}+", "-".repeat(WIDTH));
     let mut lines = vec![
+        String::new(),
         equals.clone(),
         format!("|{:^width$}|", "", width = WIDTH),
         format!("|{:^width$}|", "startup configuration", width = WIDTH),
