@@ -21,6 +21,7 @@ use crate::{
 const DEFAULT_PAGE: u64 = 1;
 const DEFAULT_SIZE: u64 = 10;
 const MAX_SIZE: u64 = 100;
+const MAX_PAGE: u64 = 10_000;
 
 /// 转账事务示例的用例实现。
 ///
@@ -93,8 +94,10 @@ impl<R: TransferRepository> TransferUseCase for TransferService<R> {
     ) -> Result<TransferRecordPage, AppError> {
         let page = page.unwrap_or(DEFAULT_PAGE);
         let size = size.unwrap_or(DEFAULT_SIZE);
-        if page == 0 {
-            return Err(AppError::bad_request("page 必须从 1 开始"));
+        if page == 0 || page > MAX_PAGE {
+            return Err(AppError::bad_request(format!(
+                "page 必须在 1 到 {MAX_PAGE} 之间"
+            )));
         }
         if size == 0 || size > MAX_SIZE {
             return Err(AppError::bad_request(format!(
@@ -602,6 +605,13 @@ mod tests {
 
         assert!(matches!(
             service.list_transfers(Some(0), None).await,
+            Err(AppError::BadRequest(_))
+        ));
+        // 页码超过上限直接拒绝，避免 (page - 1) * size 在查询层溢出。
+        assert!(matches!(
+            service
+                .list_transfers(Some(super::MAX_PAGE + 1), None)
+                .await,
             Err(AppError::BadRequest(_))
         ));
         assert!(matches!(

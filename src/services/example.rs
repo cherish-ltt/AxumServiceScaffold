@@ -39,6 +39,7 @@ impl ExampleUseCase for ExampleService {
     }
 
     async fn list_examples(&self, filters: ExampleFilters) -> Result<ExampleList, AppError> {
+        const MAX_SIZE: u64 = 100;
         let page = filters.page.unwrap_or(1);
         let size = filters.size.unwrap_or(10);
 
@@ -46,8 +47,10 @@ impl ExampleUseCase for ExampleService {
             return Err(AppError::bad_request("page 必须从 1 开始"));
         }
 
-        if size == 0 {
-            return Err(AppError::bad_request("size 必须大于 0"));
+        if size == 0 || size > MAX_SIZE {
+            return Err(AppError::bad_request(format!(
+                "size 必须在 1 到 {MAX_SIZE} 之间"
+            )));
         }
 
         let keyword = filters.keyword;

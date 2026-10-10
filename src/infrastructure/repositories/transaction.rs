@@ -178,6 +178,7 @@ impl TransferRepository for SeaOrmTransferRepository {
         let audits = transfer_audit::Entity::find()
             .filter(transfer_audit::Column::RecordId.eq(record_id))
             .order_by_asc(transfer_audit::Column::CreatedAt)
+            .order_by_asc(transfer_audit::Column::Id)
             .all(db)
             .await?;
 
@@ -202,9 +203,14 @@ impl TransferRepository for SeaOrmTransferRepository {
     where
         C: ConnectionTrait,
     {
+        // page 与 size 由 service 层校验（1..=MAX_PAGE、1..=MAX_SIZE），
+        // 此处仍用 checked_mul 兜底，防御未来被其他调用方直接使用。
+        let offset = (page - 1)
+            .checked_mul(size)
+            .ok_or_else(|| AppError::bad_request("分页偏移超出可表示范围"))?;
         let records = transfer_record::Entity::find()
             .order_by_desc(transfer_record::Column::CreatedAt)
-            .offset((page - 1) * size)
+            .offset(offset)
             .limit(size)
             .all(db)
             .await?;
