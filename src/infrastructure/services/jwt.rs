@@ -22,7 +22,7 @@ pub struct JwtService {
 impl JwtService {
     pub fn new(config: JwtConfig) -> Result<Self> {
         if config.secret.len() < 32 {
-            return Err(anyhow!("JWT_SECRET 长度至少需要 32 个字符"));
+            return Err(anyhow!("JWT_SECRET must be at least 32 characters long"));
         }
 
         Ok(Self {
@@ -68,7 +68,7 @@ impl JwtService {
 
         decode::<AccessClaims>(token, &self.decoding_key, &validation)
             .map(|data| data.claims)
-            .map_err(|_| AppError::unauthorized("访问令牌无效或已过期"))
+            .map_err(|_| AppError::unauthorized("access token is invalid or expired"))
     }
 }
 

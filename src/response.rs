@@ -31,7 +31,7 @@ impl<T> ApiResponse<T> {
 
     /// 使用默认成功文案返回带数据的响应。
     pub fn ok(data: T) -> Self {
-        Self::with_status(StatusCode::OK, "成功", Some(data))
+        Self::with_status(StatusCode::OK, "Success", Some(data))
     }
 
     /// 返回带自定义消息的成功响应。
@@ -85,33 +85,36 @@ mod tests {
     fn ok_variants_use_success_defaults() {
         let response = ApiResponse::ok("data");
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.message, "成功");
+        assert_eq!(response.message, "Success");
         assert_eq!(response.data, Some("data"));
         assert!(response.timestamp > 0);
 
-        let response = ApiResponse::ok_with_message("创建成功", "data");
+        let response = ApiResponse::ok_with_message("created", "data");
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.message, "创建成功");
+        assert_eq!(response.message, "created");
         assert!(response.data.is_some());
 
-        let response = ApiResponse::<()>::message("服务已就绪");
+        let response = ApiResponse::<()>::message("service ready");
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.message, "服务已就绪");
+        assert_eq!(response.message, "service ready");
         assert!(response.data.is_none());
 
-        let response = ApiResponse::<()>::error(StatusCode::SERVICE_UNAVAILABLE, "服务暂不可用");
+        let response = ApiResponse::<()>::error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "service temporarily unavailable",
+        );
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(response.message, "服务暂不可用");
+        assert_eq!(response.message, "service temporarily unavailable");
         assert!(response.data.is_none());
     }
 
     #[test]
     fn code_field_is_derived_from_status() {
-        let response = ApiResponse::with_status(StatusCode::CREATED, "已创建", Some("x"));
+        let response = ApiResponse::with_status(StatusCode::CREATED, "created", Some("x"));
         let json = serde_json::to_value(&response).expect("序列化响应");
 
         assert_eq!(json["code"], 201);
-        assert_eq!(json["message"], "已创建");
+        assert_eq!(json["message"], "created");
         assert_eq!(json["data"], "x");
         assert!(json["timestamp"].is_i64());
     }
@@ -130,7 +133,7 @@ mod tests {
     #[test]
     fn into_response_keeps_status_and_json_content_type() {
         let response =
-            ApiResponse::with_status(StatusCode::ACCEPTED, "已受理", Some("x")).into_response();
+            ApiResponse::with_status(StatusCode::ACCEPTED, "accepted", Some("x")).into_response();
 
         assert_eq!(response.status(), StatusCode::ACCEPTED);
         let content_type = response

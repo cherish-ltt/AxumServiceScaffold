@@ -19,7 +19,7 @@ pub async fn connect_database(config: &DatabaseConfig) -> Result<DatabaseConnect
 
     let database = Database::connect(options)
         .await
-        .with_context(|| format!("数据库连接失败: {}", config.url))?;
+        .with_context(|| format!("database connection failed: {}", config.url))?;
 
     ping_database(&database, config.connect_timeout_secs).await?;
 
@@ -29,8 +29,8 @@ pub async fn connect_database(config: &DatabaseConfig) -> Result<DatabaseConnect
 pub async fn ping_database(database: &DatabaseConnection, timeout_secs: u64) -> Result<()> {
     timeout(TokioDuration::from_secs(timeout_secs), database.ping())
         .await
-        .context("数据库健康检查超时")?
-        .context("数据库健康检查失败")?;
+        .context("database health check timed out")?
+        .context("database health check failed")?;
 
     Ok(())
 }
@@ -40,11 +40,11 @@ pub async fn run_migrations(database: &DatabaseConnection, url: &str) -> Result<
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .connect(url)
         .await
-        .context("连接迁移数据库失败")?;
+        .context("failed to connect to the migration database")?;
     sqlx::migrate!("./migrations")
         .run(&pool)
         .await
-        .context("执行数据库迁移失败")?;
+        .context("failed to run database migrations")?;
     pool.close().await;
 
     // 老库兼容与索引、种子留在 Rust：

@@ -25,7 +25,7 @@ impl ServerConfig {
         let address = format!("{}:{}", self.host, self.port);
         address
             .parse::<SocketAddr>()
-            .with_context(|| format!("无法解析服务监听地址: {address}"))
+            .with_context(|| format!("failed to parse server listen address: {address}"))
     }
 }
 
@@ -110,37 +110,43 @@ impl AppConfig {
         };
 
         if jwt.secret.len() < 32 {
-            return Err(anyhow!("JWT_SECRET 长度至少需要 32 个字符"));
+            return Err(anyhow!("JWT_SECRET must be at least 32 characters long"));
         }
         if app_env.eq_ignore_ascii_case("production")
             && jwt.secret == "change-me-to-a-random-string-with-at-least-32-characters"
         {
-            return Err(anyhow!("生产环境不能使用示例 JWT_SECRET"));
+            return Err(anyhow!(
+                "example JWT_SECRET is not allowed in production environment"
+            ));
         }
         if jwt.access_token_ttl_minutes <= 0 {
-            return Err(anyhow!("JWT_ACCESS_TOKEN_TTL_MINUTES 必须大于 0"));
+            return Err(anyhow!(
+                "JWT_ACCESS_TOKEN_TTL_MINUTES must be greater than 0"
+            ));
         }
         if database.max_connections == 0
             || database.min_connections == 0
             || database.min_connections > database.max_connections
         {
             return Err(anyhow!(
-                "数据库连接池参数无效：需要 0 < min_connections <= max_connections"
+                "invalid database pool parameters: expected 0 < min_connections <= max_connections"
             ));
         }
         if database.connect_timeout_secs == 0 || database.idle_secs == 0 {
-            return Err(anyhow!("数据库连接超时和空闲超时必须大于 0"));
+            return Err(anyhow!(
+                "database connect timeout and idle timeout must be greater than 0"
+            ));
         }
 
         let max_log_files = parse_env_or("LOG_MAX_LOG_FILES", 60_usize)?;
         if max_log_files == 0 {
-            return Err(anyhow!("LOG_MAX_LOG_FILES 必须大于 0"));
+            return Err(anyhow!("LOG_MAX_LOG_FILES must be greater than 0"));
         }
 
         let batch_max_events = parse_env_or("LOG_BATCH_MAX_EVENTS", 50_usize)?;
         let batch_flush_interval_secs = parse_env_or("LOG_BATCH_FLUSH_INTERVAL_SECS", 3_u64)?;
         if batch_max_events == 0 || batch_flush_interval_secs == 0 {
-            return Err(anyhow!("日志批量参数必须大于 0"));
+            return Err(anyhow!("log batch parameters must be greater than 0"));
         }
 
         let logging = LoggingConfig {
@@ -156,7 +162,7 @@ impl AppConfig {
                 "MINUTELY" | "Rotation::MINUTELY" => Rotation::MINUTELY,
                 "NEVER" | "Rotation::NEVER" => Rotation::NEVER,
                 "WEEKLY" | "Rotation::WEEKLY" => Rotation::WEEKLY,
-                value => return Err(anyhow!("不支持的日志轮转策略: {value}")),
+                value => return Err(anyhow!("unsupported log rotation strategy: {value}")),
             },
             max_log_files,
             out_dir: get_env_or("LOG_OUT_DIR", "/var/log/axum-app"),
@@ -184,7 +190,9 @@ impl AppConfig {
             || middleware.rate_limit_requests == 0
             || middleware.rate_limit_period_secs == 0
         {
-            return Err(anyhow!("MIDDLEWARE 容量参数必须大于 0"));
+            return Err(anyhow!(
+                "MIDDLEWARE capacity parameters must be greater than 0"
+            ));
         }
 
         Ok(Self {
@@ -200,7 +208,7 @@ impl AppConfig {
 }
 
 fn get_required_env(key: &str) -> Result<String> {
-    env::var(key).with_context(|| format!("缺少必需环境变量: {key}"))
+    env::var(key).with_context(|| format!("missing required environment variable: {key}"))
 }
 
 fn get_env_or(key: &str, default: &str) -> String {
@@ -215,7 +223,7 @@ where
     match env::var(key) {
         Ok(value) => value
             .parse::<T>()
-            .map_err(|error| anyhow!("环境变量 {key} 解析失败: {error}")),
+            .map_err(|error| anyhow!("failed to parse environment variable {key}: {error}")),
         Err(_) => Ok(default),
     }
 }

@@ -226,7 +226,11 @@ fn production_rejects_example_jwt_secret() {
 fn missing_jwt_secret_is_rejected() {
     with_env(&[("JWT_SECRET", None)], || {
         let error = AppConfig::from_env().expect_err("缺少 JWT_SECRET 应被拒绝");
-        assert!(error.to_string().contains("缺少必需环境变量"));
+        assert!(
+            error
+                .to_string()
+                .contains("missing required environment variable")
+        );
     });
 }
 
@@ -234,7 +238,7 @@ fn missing_jwt_secret_is_rejected() {
 fn short_jwt_secret_is_rejected() {
     with_env(&[("JWT_SECRET", Some("too-short"))], || {
         let error = AppConfig::from_env().expect_err("过短的 JWT_SECRET 应被拒绝");
-        assert!(error.to_string().contains("长度至少需要 32"));
+        assert!(error.to_string().contains("at least 32 characters"));
     });
 }
 
@@ -247,7 +251,7 @@ fn non_positive_token_ttl_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("非正数 TTL 应被拒绝");
-            assert!(error.to_string().contains("必须大于 0"));
+            assert!(error.to_string().contains("must be greater than 0"));
         },
     );
 }
@@ -261,7 +265,11 @@ fn zero_min_connections_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("0 最小连接数应被拒绝");
-            assert!(error.to_string().contains("连接池参数无效"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid database pool parameters")
+            );
         },
     );
 }
@@ -275,7 +283,11 @@ fn min_connections_above_max_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("最小连接数大于最大连接数应被拒绝");
-            assert!(error.to_string().contains("连接池参数无效"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid database pool parameters")
+            );
         },
     );
 }
@@ -289,7 +301,7 @@ fn zero_connect_timeout_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("0 连接超时应被拒绝");
-            assert!(error.to_string().contains("超时必须大于 0"));
+            assert!(error.to_string().contains("timeout must be greater than 0"));
         },
     );
 }
@@ -303,7 +315,7 @@ fn zero_idle_timeout_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("0 空闲超时应被拒绝");
-            assert!(error.to_string().contains("超时必须大于 0"));
+            assert!(error.to_string().contains("timeout must be greater than 0"));
         },
     );
 }
@@ -316,7 +328,9 @@ fn zero_batch_params_are_rejected() {
             || {
                 let error = AppConfig::from_env().expect_err("批量参数为 0 应被拒绝");
                 assert!(
-                    error.to_string().contains("日志批量参数必须大于 0"),
+                    error
+                        .to_string()
+                        .contains("log batch parameters must be greater than 0"),
                     "{key} 的报错信息不符合预期: {error}"
                 );
             },
@@ -333,7 +347,11 @@ fn zero_max_log_files_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("0 日志文件数应被拒绝");
-            assert!(error.to_string().contains("LOG_MAX_LOG_FILES 必须大于 0"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("LOG_MAX_LOG_FILES must be greater than 0")
+            );
         },
     );
 }
@@ -347,7 +365,11 @@ fn unsupported_log_rotation_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("不支持的轮转策略应被拒绝");
-            assert!(error.to_string().contains("不支持的日志轮转策略"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("unsupported log rotation strategy")
+            );
         },
     );
 }
@@ -361,7 +383,7 @@ fn invalid_server_port_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("非法端口应被拒绝");
-            assert!(error.to_string().contains("解析失败"));
+            assert!(error.to_string().contains("failed to parse"));
         },
     );
 }
@@ -442,7 +464,9 @@ fn zero_middleware_capacity_is_rejected() {
             || {
                 let error = AppConfig::from_env().expect_err("容量参数为 0 应被拒绝");
                 assert!(
-                    error.to_string().contains("MIDDLEWARE 容量参数必须大于 0"),
+                    error
+                        .to_string()
+                        .contains("MIDDLEWARE capacity parameters must be greater than 0"),
                     "{key} 的报错信息不符合预期: {error}"
                 );
             },

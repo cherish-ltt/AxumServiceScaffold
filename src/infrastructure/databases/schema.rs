@@ -11,7 +11,7 @@ pub async fn create_transfer_indexes(database: &DatabaseConnection) -> Result<()
         database
             .execute_unprepared(statement)
             .await
-            .context("创建事务示例索引失败")?;
+            .context("failed to create transaction example indexes")?;
     }
 
     Ok(())
@@ -26,7 +26,7 @@ pub async fn seed_transfer_accounts(database: &DatabaseConnection) -> Result<()>
         database
             .execute_unprepared(statement)
             .await
-            .context("写入事务示例种子账户失败")?;
+            .context("failed to seed transaction example accounts")?;
     }
 
     Ok(())
@@ -40,9 +40,13 @@ pub async fn apply_pending_migrations(database: &DatabaseConnection) -> Result<(
     let row = database
         .query_one_raw(statement)
         .await
-        .context("检查 transfer_records.request_id 列失败")?
-        .ok_or_else(|| anyhow::anyhow!("检查 transfer_records.request_id 列未返回结果"))?;
-    let migration: String = row.try_get("", "migration").context("读取迁移语句失败")?;
+        .context("failed to check transfer_records.request_id column")?
+        .ok_or_else(|| {
+            anyhow::anyhow!("checking transfer_records.request_id column returned no result")
+        })?;
+    let migration: String = row
+        .try_get("", "migration")
+        .context("failed to read migration statement")?;
 
     if migration.is_empty() {
         return Ok(());
@@ -51,7 +55,7 @@ pub async fn apply_pending_migrations(database: &DatabaseConnection) -> Result<(
     database
         .execute_unprepared(&migration)
         .await
-        .context("补齐 transfer_records.request_id 列失败")?;
+        .context("failed to add transfer_records.request_id column")?;
 
     Ok(())
 }

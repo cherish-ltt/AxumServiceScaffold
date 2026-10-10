@@ -48,7 +48,7 @@ impl Modify for SecurityAddon {
 pub struct DocMessageResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "成功")]
+    #[schema(example = "Success")]
     pub message: String,
     #[schema(value_type = Option<Object>, example = json!(null))]
     pub data: Option<serde_json::Value>,
@@ -60,7 +60,7 @@ pub struct DocMessageResponse {
 pub struct DocErrorResponse {
     #[schema(example = 400)]
     pub code: u16,
-    #[schema(example = "请求参数错误")]
+    #[schema(example = "Bad request")]
     pub message: String,
     #[schema(value_type = Option<Object>, example = json!(null))]
     pub data: Option<serde_json::Value>,
@@ -72,7 +72,7 @@ pub struct DocErrorResponse {
 pub struct DocWelcomeResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "成功")]
+    #[schema(example = "Success")]
     pub message: String,
     pub data: Option<WelcomeResponse>,
     #[schema(example = 1713179523000i64)]
@@ -83,7 +83,7 @@ pub struct DocWelcomeResponse {
 pub struct DocHealthResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "健康检查完成")]
+    #[schema(example = "Health check completed")]
     pub message: String,
     pub data: Option<HealthResponse>,
     #[schema(example = 1713179523000i64)]
@@ -94,7 +94,7 @@ pub struct DocHealthResponse {
 pub struct DocAccessTokenResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "调试令牌签发成功")]
+    #[schema(example = "Debug token issued")]
     pub message: String,
     pub data: Option<AccessTokenResponse>,
     #[schema(example = 1713179523000i64)]
@@ -105,7 +105,7 @@ pub struct DocAccessTokenResponse {
 pub struct DocCurrentUserResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "成功")]
+    #[schema(example = "Success")]
     pub message: String,
     pub data: Option<CurrentUserResponse>,
     #[schema(example = 1713179523000i64)]
@@ -116,7 +116,7 @@ pub struct DocCurrentUserResponse {
 pub struct DocExampleEchoResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "示例对象创建成功")]
+    #[schema(example = "Example object created")]
     pub message: String,
     pub data: Option<ExampleEchoResponse>,
     #[schema(example = 1713179523000i64)]
@@ -127,7 +127,7 @@ pub struct DocExampleEchoResponse {
 pub struct DocExampleListResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "成功")]
+    #[schema(example = "Success")]
     pub message: String,
     pub data: Option<ExampleListResponse>,
     #[schema(example = 1713179523000i64)]
@@ -138,7 +138,7 @@ pub struct DocExampleListResponse {
 pub struct DocExampleDetailResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "成功")]
+    #[schema(example = "Success")]
     pub message: String,
     pub data: Option<ExampleDetailResponse>,
     #[schema(example = 1713179523000i64)]
@@ -149,7 +149,7 @@ pub struct DocExampleDetailResponse {
 pub struct DocTransferReceiptResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "转账事务已提交")]
+    #[schema(example = "Transfer transaction committed")]
     pub message: String,
     pub data: Option<TransferReceiptResponse>,
     #[schema(example = 1713179523000i64)]
@@ -160,7 +160,7 @@ pub struct DocTransferReceiptResponse {
 pub struct DocTransferDetailResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "成功")]
+    #[schema(example = "Success")]
     pub message: String,
     pub data: Option<TransferDetailResponse>,
     #[schema(example = 1713179523000i64)]
@@ -171,7 +171,7 @@ pub struct DocTransferDetailResponse {
 pub struct DocTransferListResponse {
     #[schema(example = 200)]
     pub code: u16,
-    #[schema(example = "成功")]
+    #[schema(example = "Success")]
     pub message: String,
     pub data: Option<TransferListResponse>,
     #[schema(example = 1713179523000i64)]
@@ -229,10 +229,10 @@ pub struct DocTransferListResponse {
     ),
     modifiers(&SecurityAddon),
     tags(
-        (name = SYSTEM_TAG, description = "系统基础接口"),
-        (name = AUTH_TAG, description = "JWT 鉴权接口"),
-        (name = EXAMPLE_TAG, description = "示例业务接口"),
-        (name = TRANSACTION_TAG, description = "事务与持久化示例接口")
+        (name = SYSTEM_TAG, description = "System base APIs"),
+        (name = AUTH_TAG, description = "JWT authentication APIs"),
+        (name = EXAMPLE_TAG, description = "Example business APIs"),
+        (name = TRANSACTION_TAG, description = "Transaction and persistence example APIs")
     )
 )]
 struct ApiDoc;

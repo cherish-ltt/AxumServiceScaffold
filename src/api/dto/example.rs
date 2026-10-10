@@ -13,9 +13,9 @@ use utoipa::{IntoParams, ToSchema};
 #[cfg_attr(feature = "docs", derive(ToSchema))]
 #[derive(Debug, Deserialize)]
 pub struct ExampleEchoRequest {
-    #[cfg_attr(feature = "docs", schema(example = "搭建新服务"))]
+    #[cfg_attr(feature = "docs", schema(example = "Set up a new service"))]
     pub title: String,
-    #[cfg_attr(feature = "docs", schema(example = "先接入日志和 JWT"))]
+    #[cfg_attr(feature = "docs", schema(example = "Start with logging and JWT"))]
     pub note: Option<String>,
 }
 
@@ -36,9 +36,9 @@ pub struct ExampleEchoResponse {
         schema(example = "019680cc-7e1c-7ec0-b7b8-4b4f8e9dff10")
     )]
     pub id: String,
-    #[cfg_attr(feature = "docs", schema(example = "搭建新服务"))]
+    #[cfg_attr(feature = "docs", schema(example = "Set up a new service"))]
     pub title: String,
-    #[cfg_attr(feature = "docs", schema(example = "先接入日志和 JWT"))]
+    #[cfg_attr(feature = "docs", schema(example = "Start with logging and JWT"))]
     pub note: Option<String>,
     #[cfg_attr(feature = "docs", schema(example = "example-service"))]
     pub source: String,
@@ -62,7 +62,7 @@ pub struct ExampleQuery {
     pub page: Option<u64>,
     #[cfg_attr(feature = "docs", param(example = 10))]
     pub size: Option<u64>,
-    #[cfg_attr(feature = "docs", param(example = "服务"))]
+    #[cfg_attr(feature = "docs", param(example = "service"))]
     pub keyword: Option<String>,
 }
 
@@ -81,9 +81,12 @@ impl From<ExampleQuery> for ExampleFilters {
 pub struct ExampleListItem {
     #[cfg_attr(feature = "docs", schema(example = "example_001"))]
     pub id: String,
-    #[cfg_attr(feature = "docs", schema(example = "服务模板"))]
+    #[cfg_attr(feature = "docs", schema(example = "service template"))]
     pub title: String,
-    #[cfg_attr(feature = "docs", schema(example = "用于演示分页和查询参数"))]
+    #[cfg_attr(
+        feature = "docs",
+        schema(example = "demo for pagination and query parameters")
+    )]
     pub summary: String,
 }
 
@@ -104,7 +107,7 @@ pub struct ExampleListResponse {
     pub page: u64,
     #[cfg_attr(feature = "docs", schema(example = 10))]
     pub size: u64,
-    #[cfg_attr(feature = "docs", schema(example = "服务"))]
+    #[cfg_attr(feature = "docs", schema(example = "service"))]
     pub keyword: Option<String>,
     pub items: Vec<ExampleListItem>,
 }
@@ -125,11 +128,11 @@ impl From<ExampleList> for ExampleListResponse {
 pub struct ExampleDetailResponse {
     #[cfg_attr(feature = "docs", schema(example = "example_001"))]
     pub id: String,
-    #[cfg_attr(feature = "docs", schema(example = "服务模板"))]
+    #[cfg_attr(feature = "docs", schema(example = "service template"))]
     pub title: String,
     #[cfg_attr(
         feature = "docs",
-        schema(example = "这是一个用于扩展新模块的详情接口模板。")
+        schema(example = "A detail API template for extending new modules.")
     )]
     pub description: String,
     #[cfg_attr(feature = "docs", schema(example = "demo-admin"))]

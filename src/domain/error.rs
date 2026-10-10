@@ -2,21 +2,21 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error("配置错误: {0}")]
+    #[error("Configuration error: {0}")]
     Config(String),
-    #[error("请求参数错误: {0}")]
+    #[error("Bad request: {0}")]
     BadRequest(String),
-    #[error("未授权访问: {0}")]
+    #[error("Unauthorized: {0}")]
     Unauthorized(String),
-    #[error("资源不存在: {0}")]
+    #[error("Not found: {0}")]
     NotFound(String),
-    #[error("资源冲突: {0}")]
+    #[error("Conflict: {0}")]
     Conflict(String),
-    #[error("服务暂不可用: {0}")]
+    #[error("Service unavailable: {0}")]
     Unavailable(String),
-    #[error("数据库错误: {0}")]
+    #[error("Database error: {0}")]
     Database(String),
-    #[error("内部错误: {0}")]
+    #[error("Internal error: {0}")]
     Internal(String),
 }
 
@@ -112,36 +112,36 @@ mod tests {
     #[test]
     fn display_messages_include_details() {
         assert_eq!(
-            AppError::bad_request("标题不能为空").to_string(),
-            "请求参数错误: 标题不能为空"
+            AppError::bad_request("title must not be empty").to_string(),
+            "Bad request: title must not be empty"
         );
         assert_eq!(
-            AppError::unauthorized("令牌过期").to_string(),
-            "未授权访问: 令牌过期"
+            AppError::unauthorized("token expired").to_string(),
+            "Unauthorized: token expired"
         );
         assert_eq!(
             AppError::not_found("example_001").to_string(),
-            "资源不存在: example_001"
+            "Not found: example_001"
         );
         assert_eq!(
-            AppError::conflict("幂等键重复").to_string(),
-            "资源冲突: 幂等键重复"
+            AppError::conflict("duplicate idempotency key").to_string(),
+            "Conflict: duplicate idempotency key"
         );
         assert_eq!(
-            AppError::unavailable("数据库未就绪").to_string(),
-            "服务暂不可用: 数据库未就绪"
+            AppError::unavailable("database not ready").to_string(),
+            "Service unavailable: database not ready"
         );
         assert_eq!(
-            AppError::Config("缺字段".to_string()).to_string(),
-            "配置错误: 缺字段"
+            AppError::Config("missing field".to_string()).to_string(),
+            "Configuration error: missing field"
         );
         assert_eq!(
-            AppError::Database("连接失败".to_string()).to_string(),
-            "数据库错误: 连接失败"
+            AppError::Database("connection failed".to_string()).to_string(),
+            "Database error: connection failed"
         );
         assert_eq!(
             AppError::Internal("panic".to_string()).to_string(),
-            "内部错误: panic"
+            "Internal error: panic"
         );
     }
 
@@ -153,8 +153,10 @@ mod tests {
 
     #[test]
     fn db_error_converts_to_database() {
-        let error: AppError = sea_orm::DbErr::Custom("连接失败".to_string()).into();
-        assert!(matches!(error, AppError::Database(message) if message.contains("连接失败")));
+        let error: AppError = sea_orm::DbErr::Custom("connection failed".to_string()).into();
+        assert!(
+            matches!(error, AppError::Database(message) if message.contains("connection failed"))
+        );
     }
 
     /// 真实触发数据库唯一约束，确认被识别为 409 冲突而不是 500。

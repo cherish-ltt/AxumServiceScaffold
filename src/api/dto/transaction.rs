@@ -20,7 +20,7 @@ pub struct TransferRequest {
     pub to_account_id: String,
     #[cfg_attr(feature = "docs", schema(example = 25000))]
     pub amount_cents: i64,
-    #[cfg_attr(feature = "docs", schema(example = "示例转账"))]
+    #[cfg_attr(feature = "docs", schema(example = "sample transfer"))]
     pub remark: Option<String>,
     /// 幂等键：同一个键重复提交会触发唯一约束冲突并回滚整个事务。
     #[cfg_attr(feature = "docs", schema(example = "req-20260927-0001"))]
@@ -69,7 +69,7 @@ pub struct TransferReceiptResponse {
     pub from_balance_after_cents: i64,
     #[cfg_attr(feature = "docs", schema(example = 125000))]
     pub to_balance_after_cents: i64,
-    #[cfg_attr(feature = "docs", schema(example = "示例转账"))]
+    #[cfg_attr(feature = "docs", schema(example = "sample transfer"))]
     pub remark: Option<String>,
     #[cfg_attr(feature = "docs", schema(example = 1790000000000i64))]
     pub created_at: i64,
@@ -117,7 +117,7 @@ pub struct TransferRecordItem {
     pub from_balance_after_cents: i64,
     #[cfg_attr(feature = "docs", schema(example = 125000))]
     pub to_balance_after_cents: i64,
-    #[cfg_attr(feature = "docs", schema(example = "示例转账"))]
+    #[cfg_attr(feature = "docs", schema(example = "sample transfer"))]
     pub remark: Option<String>,
     #[cfg_attr(feature = "docs", schema(example = 1790000000000i64))]
     pub created_at: i64,
@@ -146,7 +146,7 @@ pub struct TransferAuditItem {
     pub action: String,
     #[cfg_attr(
         feature = "docs",
-        schema(example = "acc_alice 余额 100000 -> 75000，acc_bob 余额 100000 -> 125000")
+        schema(example = "acc_alice balance 100000 -> 75000, acc_bob balance 100000 -> 125000")
     )]
     pub detail: String,
     #[cfg_attr(feature = "docs", schema(example = 1790000000000i64))]

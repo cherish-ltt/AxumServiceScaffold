@@ -12,8 +12,11 @@ use crate::response::ApiResponse;
 /// 访问日志（TraceLayer）已记录每次请求与状态码。
 pub async fn overload(err: BoxError) -> Response {
     if err.is::<Overloaded>() {
-        return ApiResponse::<()>::error(StatusCode::SERVICE_UNAVAILABLE, "服务繁忙，请稍后重试")
-            .into_response();
+        return ApiResponse::<()>::error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Service is busy, please retry later",
+        )
+        .into_response();
     }
     internal(err)
 }
@@ -24,15 +27,19 @@ pub async fn overload(err: BoxError) -> Response {
 /// 访问日志（TraceLayer）已记录每次请求与状态码。
 pub async fn rate_limited(err: BoxError) -> Response {
     if err.is::<Overloaded>() {
-        return ApiResponse::<()>::error(StatusCode::TOO_MANY_REQUESTS, "请求过于频繁，请稍后重试")
-            .into_response();
+        return ApiResponse::<()>::error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many requests, please retry later",
+        )
+        .into_response();
     }
     internal(err)
 }
 
 fn internal(err: BoxError) -> Response {
-    tracing::error!("中间件栈内部错误: {err}");
-    ApiResponse::<()>::error(StatusCode::INTERNAL_SERVER_ERROR, "服务器内部错误").into_response()
+    tracing::error!("middleware stack internal error: {err}");
+    ApiResponse::<()>::error(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        .into_response()
 }
 
 #[cfg(test)]

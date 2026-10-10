@@ -37,7 +37,7 @@ impl FromRequestParts<Arc<Container>> for CurrentUser {
             .headers
             .get(AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
-            .ok_or_else(|| AppError::unauthorized("缺少 Authorization 请求头"))?;
+            .ok_or_else(|| AppError::unauthorized("missing Authorization header"))?;
 
         let current_user = state
             .auth_service

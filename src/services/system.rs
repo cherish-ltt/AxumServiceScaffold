@@ -51,7 +51,7 @@ impl SystemUseCase for SystemService {
 
     async fn ready(&self) -> Result<(), AppError> {
         if ping_database(&self.database, 2).await.is_err() {
-            return Err(AppError::unavailable("数据库尚未就绪"));
+            return Err(AppError::unavailable("database is not ready yet"));
         }
 
         Ok(())

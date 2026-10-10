@@ -36,28 +36,30 @@ async fn main() -> Result<()> {
     let address = container.config.server.socket_addr()?;
 
     let listener = tokio::net::TcpListener::bind(address).await?;
-    info!(address = %address, "HTTP 服务启动成功");
+    info!(address = %address, "HTTP server started successfully");
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    info!("HTTP 服务已优雅关闭");
+    info!("HTTP server shut down gracefully");
     if let Err(error) = container.database.close_by_ref().await {
-        tracing::warn!(%error, "关闭数据库连接池失败");
+        tracing::warn!(%error, "failed to close the database connection pool");
     }
     Ok(())
 }
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.expect("监听 Ctrl-C 信号失败");
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to listen for Ctrl-C signal");
     };
 
     #[cfg(unix)]
     let terminate = async {
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("监听终止信号失败")
+            .expect("failed to listen for termination signal")
             .recv()
             .await;
     };
@@ -66,7 +68,7 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => info!("收到 Ctrl-C，开始优雅关闭"),
-        _ = terminate => info!("收到终止信号，开始优雅关闭"),
+        _ = ctrl_c => info!("received Ctrl-C, starting graceful shutdown"),
+        _ = terminate => info!("received termination signal, starting graceful shutdown"),
     }
 }

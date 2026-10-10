@@ -47,9 +47,9 @@ pub fn router() -> Router<Arc<Container>> {
         ("bearer_auth" = [])
     ),
     responses(
-        (status = 200, description = "转账流水分页查询成功", body = DocTransferListResponse),
-        (status = 400, description = "分页参数错误", body = DocErrorResponse),
-        (status = 401, description = "未授权或令牌无效", body = DocErrorResponse)
+        (status = 200, description = "Transfer records fetched (paginated)", body = DocTransferListResponse),
+        (status = 400, description = "Invalid pagination parameters", body = DocErrorResponse),
+        (status = 401, description = "Unauthorized or invalid token", body = DocErrorResponse)
     )
 ))]
 pub async fn list_transfers(
@@ -70,15 +70,15 @@ pub async fn list_transfers(
     path = "/api/v1/transactions/{id}",
     tag = "Transaction",
     params(
-        ("id" = String, Path, description = "转账流水 ID")
+        ("id" = String, Path, description = "Transfer record ID")
     ),
     security(
         ("bearer_auth" = [])
     ),
     responses(
-        (status = 200, description = "流水详情与审计日志查询成功", body = DocTransferDetailResponse),
-        (status = 401, description = "未授权或令牌无效", body = DocErrorResponse),
-        (status = 404, description = "流水不存在", body = DocErrorResponse)
+        (status = 200, description = "Transfer detail and audit logs fetched", body = DocTransferDetailResponse),
+        (status = 401, description = "Unauthorized or invalid token", body = DocErrorResponse),
+        (status = 404, description = "Transfer record not found", body = DocErrorResponse)
     )
 ))]
 pub async fn get_transfer(
@@ -104,11 +104,11 @@ pub async fn get_transfer(
         ("bearer_auth" = [])
     ),
     responses(
-        (status = 200, description = "转账事务已提交", body = DocTransferReceiptResponse),
-        (status = 400, description = "请求参数错误或余额不足", body = DocErrorResponse),
-        (status = 401, description = "未授权或令牌无效", body = DocErrorResponse),
-        (status = 404, description = "账户不存在", body = DocErrorResponse),
-        (status = 500, description = "事务已回滚（force_fail 验证）", body = DocErrorResponse)
+        (status = 200, description = "Transfer transaction committed", body = DocTransferReceiptResponse),
+        (status = 400, description = "Bad request or insufficient balance", body = DocErrorResponse),
+        (status = 401, description = "Unauthorized or invalid token", body = DocErrorResponse),
+        (status = 404, description = "Account not found", body = DocErrorResponse),
+        (status = 500, description = "Transaction rolled back (force_fail verification)", body = DocErrorResponse)
     )
 ))]
 pub async fn dev_transfer(
@@ -119,7 +119,7 @@ pub async fn dev_transfer(
     let receipt = container.transfer_service.transfer(payload.into()).await?;
 
     Ok(ApiResponse::ok_with_message(
-        "转账事务已提交",
+        "Transfer transaction committed",
         receipt.into(),
     ))
 }

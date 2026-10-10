@@ -37,8 +37,8 @@ pub fn router() -> Router<Arc<Container>> {
     tag = "Example",
     request_body = ExampleEchoRequest,
     responses(
-        (status = 200, description = "示例对象创建成功", body = DocExampleEchoResponse),
-        (status = 400, description = "请求参数错误", body = DocErrorResponse)
+        (status = 200, description = "Example object created", body = DocExampleEchoResponse),
+        (status = 400, description = "Bad request", body = DocErrorResponse)
     )
 ))]
 pub async fn create_echo(
@@ -51,7 +51,7 @@ pub async fn create_echo(
         .await?;
 
     Ok(ApiResponse::ok_with_message(
-        "示例对象创建成功",
+        "Example object created",
         echo.into(),
     ))
 }
@@ -62,7 +62,7 @@ pub async fn create_echo(
     tag = "Example",
     params(ExampleQuery),
     responses(
-        (status = 200, description = "示例列表获取成功", body = DocExampleListResponse)
+        (status = 200, description = "Example list fetched", body = DocExampleListResponse)
     )
 ))]
 pub async fn list_examples(
@@ -81,15 +81,15 @@ pub async fn list_examples(
     path = "/api/v1/examples/{id}",
     tag = "Example",
     params(
-        ("id" = String, Path, description = "示例 ID")
+        ("id" = String, Path, description = "Example ID")
     ),
     security(
         ("bearer_auth" = [])
     ),
     responses(
-        (status = 200, description = "示例详情获取成功", body = DocExampleDetailResponse),
-        (status = 401, description = "未授权或令牌无效", body = DocErrorResponse),
-        (status = 404, description = "资源不存在", body = DocErrorResponse)
+        (status = 200, description = "Example detail fetched", body = DocExampleDetailResponse),
+        (status = 401, description = "Unauthorized or invalid token", body = DocErrorResponse),
+        (status = 404, description = "Not found", body = DocErrorResponse)
     )
 ))]
 pub async fn get_example(

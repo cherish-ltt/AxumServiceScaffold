@@ -31,7 +31,7 @@ impl AuthUseCase for AuthService {
     ) -> Result<crate::domain::models::auth::AccessToken, AppError> {
         let username = command.username.trim();
         if username.is_empty() {
-            return Err(AppError::bad_request("用户名不能为空"));
+            return Err(AppError::bad_request("username must not be empty"));
         }
 
         let user_id = command
@@ -55,10 +55,12 @@ impl AuthUseCase for AuthService {
         let (scheme, token) = authorization
             .trim()
             .split_once(char::is_whitespace)
-            .ok_or_else(|| AppError::unauthorized("Authorization 格式应为 Bearer <token>"))?;
+            .ok_or_else(|| {
+                AppError::unauthorized("Authorization header must use the format 'Bearer <token>'")
+            })?;
         if !scheme.eq_ignore_ascii_case("Bearer") || token.trim().is_empty() {
             return Err(AppError::unauthorized(
-                "Authorization 格式应为 Bearer <token>",
+                "Authorization header must use the format 'Bearer <token>'",
             ));
         }
 

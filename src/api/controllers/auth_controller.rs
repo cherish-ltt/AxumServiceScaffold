@@ -33,8 +33,8 @@ pub fn router() -> Router<Arc<Container>> {
     tag = "Auth",
     request_body = DevLoginRequest,
     responses(
-        (status = 200, description = "调试令牌签发成功", body = DocAccessTokenResponse),
-        (status = 400, description = "请求参数错误", body = DocErrorResponse)
+        (status = 200, description = "Debug token issued", body = DocAccessTokenResponse),
+        (status = 400, description = "Bad request", body = DocErrorResponse)
     )
 ))]
 pub async fn dev_login(
@@ -47,7 +47,7 @@ pub async fn dev_login(
         .await?;
 
     Ok(ApiResponse::ok_with_message(
-        "调试令牌签发成功",
+        "Debug token issued",
         token.into(),
     ))
 }
@@ -60,8 +60,8 @@ pub async fn dev_login(
         ("bearer_auth" = [])
     ),
     responses(
-        (status = 200, description = "当前用户信息获取成功", body = DocCurrentUserResponse),
-        (status = 401, description = "未授权或令牌无效", body = DocErrorResponse)
+        (status = 200, description = "Current user info fetched", body = DocCurrentUserResponse),
+        (status = 401, description = "Unauthorized or invalid token", body = DocErrorResponse)
     )
 ))]
 pub async fn me(current_user: CurrentUser) -> Result<ApiResponse<CurrentUserResponse>, AppError> {

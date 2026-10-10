@@ -170,7 +170,7 @@ async fn health_reports_ok() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["code"], 200);
-    assert_eq!(body["message"], "健康检查完成");
+    assert_eq!(body["message"], "Health check completed");
     assert_eq!(body["data"]["status"], "ok");
     assert_eq!(body["data"]["database_status"], "not_checked");
 }
@@ -181,7 +181,7 @@ async fn ready_confirms_database() {
     let (status, body) = send(app, get("/api/v1/system/ready")).await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["message"], "服务已就绪");
+    assert_eq!(body["message"], "Service ready");
     assert!(body.get("data").is_none(), "无数据时不应输出 data 字段");
 }
 
@@ -199,7 +199,7 @@ async fn dev_login_issues_bearer_token() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["message"], "调试令牌签发成功");
+    assert_eq!(body["message"], "Debug token issued");
     assert_eq!(body["data"]["token_type"], "Bearer");
     assert_eq!(body["data"]["expires_in_seconds"], 120 * 60);
     assert!(
@@ -222,7 +222,7 @@ async fn dev_login_rejects_blank_username() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body["code"], 400);
-    assert!(body["message"].as_str().unwrap_or("").contains("用户名"));
+    assert!(body["message"].as_str().unwrap_or("").contains("username"));
 }
 
 #[cfg(debug_assertions)]
@@ -305,14 +305,14 @@ async fn echo_creates_example() {
         app,
         post_json(
             "/api/v1/examples/echo",
-            json!({ "title": "搭建新服务", "note": "先接入日志和 JWT" }),
+            json!({ "title": "Set up a new service", "note": "Start with logging and JWT" }),
         ),
     )
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["data"]["title"], "搭建新服务");
-    assert_eq!(body["data"]["note"], "先接入日志和 JWT");
+    assert_eq!(body["data"]["title"], "Set up a new service");
+    assert_eq!(body["data"]["note"], "Start with logging and JWT");
     assert_eq!(body["data"]["source"], "example-service");
     assert!(!body["data"]["id"].as_str().unwrap_or("").is_empty());
 }
@@ -340,7 +340,7 @@ async fn echo_rejects_blank_title() {
     .await;
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(body["message"].as_str().unwrap_or("").contains("标题"));
+    assert!(body["message"].as_str().unwrap_or("").contains("title"));
 }
 
 #[tokio::test]
@@ -496,7 +496,7 @@ async fn transfer_commits_balances_record_and_audits() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["message"], "转账事务已提交");
+    assert_eq!(body["message"], "Transfer transaction committed");
     assert_eq!(body["data"]["amount_cents"], 25000);
     assert_eq!(body["data"]["from_balance_after_cents"], 75000);
     assert_eq!(body["data"]["to_balance_after_cents"], 125000);
@@ -551,7 +551,7 @@ async fn duplicate_request_id_returns_conflict_without_extra_writes() {
     assert!(
         body["message"]
             .as_str()
-            .is_some_and(|message| message.contains("资源冲突")),
+            .is_some_and(|message| message.contains("Conflict")),
         "409 应透出可读原因，实际: {body}"
     );
 
@@ -629,7 +629,7 @@ async fn transfer_rolls_back_every_write_when_force_fail_is_on() {
     .await;
 
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-    assert_eq!(body["message"], "服务器内部错误");
+    assert_eq!(body["message"], "Internal server error");
 
     // 回滚后流水分页应为空，说明已写入的账户、流水、审计都被撤销。
     let (status, list) = send(app.clone(), get_with_bearer("/api/v1/transactions", &token)).await;
@@ -921,7 +921,7 @@ async fn expired_token_is_rejected_with_401() {
     assert!(
         body["message"]
             .as_str()
-            .is_some_and(|message| message.contains("已过期")),
+            .is_some_and(|message| message.contains("expired")),
         "过期令牌应给出可读原因: {body}"
     );
 }

@@ -27,7 +27,7 @@ impl ExampleUseCase for ExampleService {
     async fn create_echo(&self, command: CreateExampleCommand) -> Result<ExampleEcho, AppError> {
         let title = command.title.trim();
         if title.is_empty() {
-            return Err(AppError::bad_request("标题不能为空"));
+            return Err(AppError::bad_request("title must not be empty"));
         }
 
         Ok(ExampleEcho {
@@ -44,12 +44,12 @@ impl ExampleUseCase for ExampleService {
         let size = filters.size.unwrap_or(10);
 
         if page == 0 {
-            return Err(AppError::bad_request("page 必须从 1 开始"));
+            return Err(AppError::bad_request("page must start from 1"));
         }
 
         if size == 0 || size > MAX_SIZE {
             return Err(AppError::bad_request(format!(
-                "size 必须在 1 到 {MAX_SIZE} 之间"
+                "size must be between 1 and {MAX_SIZE}"
             )));
         }
 
@@ -57,18 +57,18 @@ impl ExampleUseCase for ExampleService {
         let mut items = vec![
             ExampleItem {
                 id: "example_001".to_string(),
-                title: "服务模板".to_string(),
-                summary: "用于演示分页和查询参数".to_string(),
+                title: "Service template".to_string(),
+                summary: "Demo for pagination and query parameters".to_string(),
             },
             ExampleItem {
                 id: "example_002".to_string(),
-                title: "鉴权样例".to_string(),
-                summary: "用于演示 JWT 保护接口".to_string(),
+                title: "Auth sample".to_string(),
+                summary: "Demo of JWT-protected endpoints".to_string(),
             },
             ExampleItem {
                 id: "example_003".to_string(),
-                title: "Swagger 样例".to_string(),
-                summary: "用于演示 OpenAPI 注解组织方式".to_string(),
+                title: "Swagger sample".to_string(),
+                summary: "Demo of OpenAPI annotation organization".to_string(),
             },
         ];
 
@@ -90,7 +90,7 @@ impl ExampleUseCase for ExampleService {
         current_user: CurrentUser,
     ) -> Result<ExampleDetail, AppError> {
         if id.trim().is_empty() {
-            return Err(AppError::not_found("示例 ID 不存在"));
+            return Err(AppError::not_found("example ID does not exist"));
         }
 
         Ok(ExampleDetail::new(id, current_user))

@@ -91,22 +91,22 @@ fn logs_are_flushed_on_fixed_interval() {
     logging::log_startup_config(&config);
 
     for i in 0..3 {
-        tracing::info!("间隔刷盘第 {i} 条");
+        tracing::info!("interval flush entry {i}");
     }
     // 未满 100 条、间隔 1s：轮询等待定时线程落盘，避免固定 sleep 造成的时序抖动。
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let mut logs;
     loop {
         logs = read_logs(&out_dir);
-        if logs.contains("间隔刷盘第 2 条") || std::time::Instant::now() > deadline {
+        if logs.contains("interval flush entry 2") || std::time::Instant::now() > deadline {
             break;
         }
         thread::sleep(Duration::from_millis(100));
     }
     assert!(
-        logs.contains("间隔刷盘第 0 条")
-            && logs.contains("间隔刷盘第 1 条")
-            && logs.contains("间隔刷盘第 2 条"),
+        logs.contains("interval flush entry 0")
+            && logs.contains("interval flush entry 1")
+            && logs.contains("interval flush entry 2"),
         "定时刷盘线程应在间隔到期后落盘缓冲日志:\n{logs}"
     );
     assert!(

@@ -17,12 +17,12 @@ impl IntoResponse for AppError {
             | StatusCode::NOT_FOUND
             | StatusCode::CONFLICT => self.to_string(),
             StatusCode::SERVICE_UNAVAILABLE => {
-                error!(error = %self, "服务不可用");
-                "服务暂不可用".to_string()
+                error!(error = %self, "service unavailable");
+                "Service temporarily unavailable".to_string()
             },
             _ => {
-                error!(error = %self, "请求处理失败");
-                "服务器内部错误".to_string()
+                error!(error = %self, "request handling failed");
+                "Internal server error".to_string()
             },
         };
         ApiResponse::<()>::error(status, message).into_response()
@@ -39,13 +39,13 @@ mod tests {
     #[test]
     fn each_error_maps_to_expected_status() {
         let cases = [
-            (AppError::bad_request("参数错误"), 400),
-            (AppError::unauthorized("未授权"), 401),
-            (AppError::not_found("资源不存在"), 404),
-            (AppError::conflict("幂等键重复"), 409),
-            (AppError::unavailable("数据库未就绪"), 503),
-            (AppError::internal("意外失败"), 500),
-            (AppError::Config("配置缺失".to_string()), 500),
+            (AppError::bad_request("invalid parameter"), 400),
+            (AppError::unauthorized("unauthorized"), 401),
+            (AppError::not_found("not found"), 404),
+            (AppError::conflict("duplicate idempotency key"), 409),
+            (AppError::unavailable("database not ready"), 503),
+            (AppError::internal("unexpected failure"), 500),
+            (AppError::Config("missing configuration".to_string()), 500),
         ];
 
         for (error, expected) in cases {
@@ -56,21 +56,21 @@ mod tests {
 
     #[tokio::test]
     async fn client_errors_keep_message() {
-        let response = AppError::bad_request("标题不能为空").into_response();
+        let response = AppError::bad_request("title must not be empty").into_response();
         let bytes = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("读取响应体");
         let body: serde_json::Value = serde_json::from_slice(&bytes).expect("解析响应体");
 
         assert_eq!(body["code"], 400);
-        assert_eq!(body["message"], "请求参数错误: 标题不能为空");
+        assert_eq!(body["message"], "Bad request: title must not be empty");
     }
 
     #[tokio::test]
     async fn server_errors_are_masked() {
         let errors = [
-            AppError::unavailable("数据库未就绪"),
-            AppError::internal("意外失败"),
+            AppError::unavailable("database not ready"),
+            AppError::internal("unexpected failure"),
         ];
 
         for error in errors {
@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn unavailable_maps_to_service_unavailable() {
-        let response = AppError::unavailable("数据库未就绪").into_response();
+        let response = AppError::unavailable("database not ready").into_response();
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

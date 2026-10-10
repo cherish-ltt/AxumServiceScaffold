@@ -65,7 +65,7 @@ fn logging_init_creates_log_file_in_configured_dir() {
         Err(e) => panic!("日志初始化应成功: {e}"),
     };
 
-    tracing::info!("logging 初始化测试日志");
+    tracing::info!("logging init test message");
     drop(guard);
 
     // 不只断言文件存在，还要断言写入的内容确实落盘（BatchGuard drop 时落盘剩余缓冲）。
@@ -76,7 +76,7 @@ fn logging_init_creates_log_file_in_configured_dir() {
         }
     }
     assert!(
-        contents.contains("logging 初始化测试日志"),
+        contents.contains("logging init test message"),
         "日志文件应包含写入的日志行，实际内容:\n{contents}"
     );
 }
@@ -90,5 +90,9 @@ fn logging_init_rejects_invalid_utc_offset() {
         Ok(_) => panic!("非法时区偏移应被拒绝"),
         Err(e) => e,
     };
-    assert!(error.to_string().contains("日志时区偏移配置无效"));
+    assert!(
+        error
+            .to_string()
+            .contains("invalid log timezone offset configuration")
+    );
 }

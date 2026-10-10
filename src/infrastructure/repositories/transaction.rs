@@ -205,9 +205,9 @@ impl TransferRepository for SeaOrmTransferRepository {
     {
         // page 与 size 由 service 层校验（1..=MAX_PAGE、1..=MAX_SIZE），
         // 此处仍用 checked_mul 兜底，防御未来被其他调用方直接使用。
-        let offset = (page - 1)
-            .checked_mul(size)
-            .ok_or_else(|| AppError::bad_request("分页偏移超出可表示范围"))?;
+        let offset = (page - 1).checked_mul(size).ok_or_else(|| {
+            AppError::bad_request("pagination offset exceeds the representable range")
+        })?;
         let records = transfer_record::Entity::find()
             .order_by_desc(transfer_record::Column::CreatedAt)
             .offset(offset)
