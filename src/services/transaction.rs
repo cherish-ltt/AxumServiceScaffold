@@ -348,7 +348,9 @@ mod tests {
             services::transaction::TransferUseCase,
         },
         entities::{transfer_account, transfer_record},
-        infrastructure::{databases::schema, repositories::transaction::SeaOrmTransferRepository},
+        infrastructure::{
+            databases::run_migrations, repositories::transaction::SeaOrmTransferRepository,
+        },
     };
     use sea_orm::EntityTrait;
     use std::sync::Arc;
@@ -366,16 +368,12 @@ mod tests {
                 .join(format!("axum-scaffold-transfer-test-{}.db", Uuid::now_v7()))
                 .display()
         );
-        let database = Database::connect(url).await.expect("连接临时数据库");
-        schema::create_transfer_tables(&database)
+        let database = Database::connect(url.clone())
             .await
-            .expect("建表成功");
-        schema::create_transfer_indexes(&database)
+            .expect("连接临时数据库");
+        run_migrations(&database, &url)
             .await
-            .expect("建索引成功");
-        schema::seed_transfer_accounts(&database)
-            .await
-            .expect("播种成功");
+            .expect("执行迁移与播种成功");
 
         let repository = Arc::new(SeaOrmTransferRepository);
         let service = TransferService::new(database.clone(), repository);

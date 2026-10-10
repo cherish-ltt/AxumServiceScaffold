@@ -1,21 +1,6 @@
 use anyhow::{Context, Result};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 
-/// 建表。
-///
-/// 语句保持 SQLite / MySQL / PostgreSQL 通用；列名与 `src/entities` 中的实体一一对应。
-/// 全新克隆仓库后无需任何手工步骤，启动或跑测试时会自动建表并播种演示账户。
-pub async fn create_transfer_tables(database: &DatabaseConnection) -> Result<()> {
-    for statement in [ACCOUNT_TABLE, RECORD_TABLE, AUDIT_TABLE] {
-        database
-            .execute_unprepared(statement)
-            .await
-            .context("创建事务示例表失败")?;
-    }
-
-    Ok(())
-}
-
 /// 补齐历史库缺列，再建索引。
 ///
 /// 顺序不能颠倒：`request_id` 列必须先存在，才能建幂等键唯一索引。
@@ -71,31 +56,6 @@ pub async fn apply_pending_migrations(database: &DatabaseConnection) -> Result<(
     Ok(())
 }
 
-const ACCOUNT_TABLE: &str = "CREATE TABLE IF NOT EXISTS transfer_accounts (\
-     id TEXT PRIMARY KEY NOT NULL, \
-     owner TEXT NOT NULL, \
-     balance_cents BIGINT NOT NULL, \
-     version BIGINT NOT NULL, \
-     updated_at BIGINT NOT NULL)";
-
-const RECORD_TABLE: &str = "CREATE TABLE IF NOT EXISTS transfer_records (\
-     id TEXT PRIMARY KEY NOT NULL, \
-     request_id TEXT, \
-     from_account_id TEXT NOT NULL, \
-     to_account_id TEXT NOT NULL, \
-     amount_cents BIGINT NOT NULL, \
-     from_balance_after_cents BIGINT NOT NULL, \
-     to_balance_after_cents BIGINT NOT NULL, \
-     remark TEXT, \
-     created_at BIGINT NOT NULL)";
-
-const AUDIT_TABLE: &str = "CREATE TABLE IF NOT EXISTS transfer_audits (\
-     id TEXT PRIMARY KEY NOT NULL, \
-     record_id TEXT NOT NULL, \
-     action TEXT NOT NULL, \
-     detail TEXT NOT NULL, \
-     created_at BIGINT NOT NULL)";
-
 const RECORD_INDEX: &str =
     "CREATE INDEX IF NOT EXISTS idx_transfer_records_created_at ON transfer_records (created_at)";
 
@@ -133,13 +93,10 @@ mod tests {
     use sea_orm::{ConnectionTrait, Database, DatabaseConnection, EntityTrait};
     use uuid::Uuid;
 
-    use super::{
-        apply_pending_migrations, create_transfer_indexes, create_transfer_tables,
-        seed_transfer_accounts,
-    };
+    use super::super::run_migrations;
     use crate::entities::{transfer_account, transfer_audit, transfer_record};
 
-    async fn setup_database() -> DatabaseConnection {
+    async fn setup_database() -> (DatabaseConnection, String) {
         let url = format!(
             "sqlite://{}?mode=rwc",
             std::env::temp_dir()
@@ -147,23 +104,24 @@ mod tests {
                 .display()
         );
 
-        Database::connect(url).await.expect("连接临时数据库")
+        let database = Database::connect(url.clone())
+            .await
+            .expect("连接临时数据库");
+        (database, url)
     }
 
-    /// 建表 + 索引 + 播种，可重复执行。
-    async fn bootstrap(database: &DatabaseConnection) {
-        create_transfer_tables(database).await.expect("建表成功");
-        create_transfer_indexes(database).await.expect("建索引成功");
-        seed_transfer_accounts(database).await.expect("播种成功");
+    /// 执行 sqlx 迁移 + 索引 + 播种，可重复执行。
+    async fn bootstrap(database: &DatabaseConnection, url: &str) {
+        run_migrations(database, url).await.expect("执行迁移成功");
     }
 
     #[tokio::test]
     async fn tables_and_seed_are_created_once() {
-        let database = setup_database().await;
+        let (database, url) = setup_database().await;
 
-        bootstrap(&database).await;
+        bootstrap(&database, &url).await;
         // 重复执行验证幂等性：再次启动服务不应产生重复账户或建表错误。
-        bootstrap(&database).await;
+        bootstrap(&database, &url).await;
 
         let accounts = transfer_account::Entity::find()
             .all(&database)
@@ -199,7 +157,7 @@ mod tests {
     /// 老库（无 request_id 列）启动后应自动补列并建好唯一索引。
     #[tokio::test]
     async fn legacy_database_gets_request_id_column_and_unique_index() {
-        let database = setup_database().await;
+        let (database, url) = setup_database().await;
 
         database
             .execute_unprepared(
@@ -224,11 +182,11 @@ mod tests {
             .await
             .expect("写入历史流水");
 
-        apply_pending_migrations(&database).await.expect("补列成功");
-        // 重复执行不应报错。
-        apply_pending_migrations(&database)
+        // 真实启动流程：sqlx 迁移建表（老库同名表自动跳过）→ 补列建索引 → 播种；重复执行应幂等。
+        run_migrations(&database, &url).await.expect("执行迁移成功");
+        run_migrations(&database, &url)
             .await
-            .expect("重复补列成功");
+            .expect("重复执行迁移成功");
 
         let legacy = transfer_record::Entity::find_by_id("legacy".to_string())
             .one(&database)
@@ -236,12 +194,6 @@ mod tests {
             .expect("查询历史流水")
             .expect("历史流水存在");
         assert!(legacy.request_id.is_none());
-
-        // 真实启动流程：建表（老表已存在会被跳过）→ 补列建索引。
-        create_transfer_tables(&database).await.expect("建表成功");
-        create_transfer_indexes(&database)
-            .await
-            .expect("建索引成功");
 
         // 唯一索引生效：同一 request_id 再次写入必然失败。
         database
