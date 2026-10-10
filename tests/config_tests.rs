@@ -122,7 +122,7 @@ fn valid_config_loads_with_defaults() {
             assert_eq!(config.logging.filter, "info,tower_http=info");
             assert_eq!(config.logging.filename_prefix, "app");
             assert_eq!(config.logging.filename_suffix, "log");
-            assert_eq!(config.logging.max_log_files, 30);
+            assert_eq!(config.logging.max_log_files, 60);
             assert_eq!(config.logging.out_dir, "/var/log/axum-app");
             assert_eq!(config.logging.batch_max_events, 50);
             assert_eq!(config.logging.batch_flush_interval_secs, 3);

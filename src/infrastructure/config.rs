@@ -132,7 +132,7 @@ impl AppConfig {
             return Err(anyhow!("数据库连接超时和空闲超时必须大于 0"));
         }
 
-        let max_log_files = parse_env_or("LOG_MAX_LOG_FILES", 30_usize)?;
+        let max_log_files = parse_env_or("LOG_MAX_LOG_FILES", 60_usize)?;
         if max_log_files == 0 {
             return Err(anyhow!("LOG_MAX_LOG_FILES 必须大于 0"));
         }

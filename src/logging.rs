@@ -289,7 +289,7 @@ impl Drop for BatchGuard {
     }
 }
 
-/// 隐藏连接串里的口令，保留其余结构以便核对目标库。，保留其余结构以便核对目标库。
+/// 隐藏连接串里的口令，保留其余结构以便核对目标库。
 ///
 /// 同时处理 `scheme://user:password@host/db` 与 `scheme://host/db?password=xxx`
 /// 两种写法：前者按最后一个 `@` 切分（口令里含 `@` 或 `:` 时也不会漏出），
