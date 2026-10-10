@@ -22,7 +22,7 @@ services/transaction.rs
 | --- | --- | --- |
 | `POST` | `/api/v1/transactions/dev-transfer` | 执行转账事务，仅调试构建注册 |
 | `GET` | `/api/v1/transactions/{id}` | 流水详情 + 同一事务写入的审计日志 |
-| `GET` | `/api/v1/transactions` | 流水分页（`page`、`size`，`size` 上限 100） |
+| `GET` | `/api/v1/transactions` | 流水分页（`page` 1~10000、`size` 上限 100） |
 
 调试构建下的完整调用流程：
 

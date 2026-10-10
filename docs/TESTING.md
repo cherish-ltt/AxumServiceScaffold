@@ -16,13 +16,14 @@ cargo test --all-features
 
 这样可以同时确认：
 
-- 调试模式下 Swagger 正常；
+- 启用 `docs` feature 时 Swagger 与 OpenAPI 文档正常（开发用 `cargo run --features docs`）；
 - 发布模式下不会暴露开发登录接口；
 - 所有 feature 和 release 构建均可通过；
 - 测试和 Clippy 检查通过。
 
-应用启动时会创建 `_schema_migrations` 表，为后续版本化迁移保留入口；同时创建事务示例的三张表并
-幂等播种演示账户。生产环境建议在部署阶段执行明确的迁移脚本，不要使用示例 JWT_SECRET。
+应用启动时通过 `sqlx::migrate!` 执行 `migrations/` 目录下的版本化迁移（记录写进 `_sqlx_migrations` 表），
+在此基础上补齐老库缺列、建索引并幂等播种演示账户。生产环境建议在部署阶段执行明确的迁移脚本，
+不要使用示例 JWT_SECRET。
 
 回滚这类“写了一半”的行为应当有测试兜底：可参考
 `services/transaction.rs` 的单测（在事务内主动失败后断言数据库无残留）与

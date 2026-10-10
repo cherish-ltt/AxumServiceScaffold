@@ -7,6 +7,56 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **分页偏移溢出**（审查 BUG-1）：`list_transfers` 新增页码上限校验
+  （`page` 必须位于 1~10000，`MAX_PAGE`），查询层用 `checked_mul` 兜底防止
+  `(page - 1) * size` 在 `u64` 上溢出；`docs/TRANSACTION.md` 接口表同步标注分页范围。
+- **release 下接口测试级联失败**（审查 BUG-2）：`tests/api_tests.rs` 中依赖
+  dev-login / dev-transfer 调试路由的辅助函数与用例（共 17 处）补上
+  `#[cfg(debug_assertions)]`，release 构建不再因路由不存在而失败。
+- **审计日志排序不稳定**（审查 M-4）：`list_audits` 在 `created_at` 基础上追加
+  `id` 二级排序，同一事务内多条审计日志顺序固定。
+- **测试健壮性**（审查 M-2/M-3/M-5/M-6/M-7）：`config_tests.rs` 的 `with_env`
+  改用 `Drop` 守卫恢复环境变量（断言 panic 也会还原）；`api_tests.rs` 的
+  `read_json` 改 `expect`（不再吞解析错误）；`logging_tests.rs` 断言日志文件内容
+  而非仅存在；`logging_interval_tests.rs` 用轮询代替固定 `sleep`；
+  `middleware_log_tests.rs` 补充全局订阅者单进程约束注释。
+- **示例列表分页上限**（审查 M-10）：`examples` 列表的 `size` 上限 100，与事务接口一致。
+- **文档与元数据修正**（审查 M-1/M-8/M-9）：`MIDDLEWARE.md` 超时描述改为
+  「进入超时层后的处理耗时，外层排队不计入」；`logging.rs` 注释去重；
+  `Cargo.toml` 的 `repository` 修正为 `cherish-ltt/AxumServiceScaffold`。
+
+### 变更
+
+- **OpenAPI 文档改为 `docs` feature 门控**（审查 S-3）：`utoipa` / `utoipa-swagger-ui`
+  转为 optional 依赖，Swagger UI 与 `/api-doc/openapi.json` 仅在 `--features docs`
+  构建下挂载（`cargo run --features docs`），不进 default 与 release 编译；
+  controller / DTO 的 `utoipa` 注解统一改投 `feature = "docs"`，仅调试专用行为
+  （dev 路由、`force_fail` 字段）保留 `debug_assertions`。CI 的 clippy 与 test
+  步骤改用 `--features docs`。
+- **建表迁移到 `sqlx::migrate`**（审查 S-5）：`migrations/` 目录新增版本化迁移文件
+  （`0001_create_transfer_tables.sql`），`databases::run_migrations(database, url)`
+  以 `sqlx::migrate!` 执行并记录到 `_sqlx_migrations`，随后补齐老库缺列、建索引
+  并幂等播种；`schema.rs` 不再负责建表。
+- **默认日志文件数统一为 60**（审查 S-1）：`LOG_MAX_LOG_FILES` 代码兜底默认值
+  与 `.env-example` 一致，`docs/LOGGING.md` 参数表同步。
+- **依赖版本锁定收紧**（审查 S-2）：`tracing` 锁定到 `=0.1.44`、
+  `tracing-subscriber` 锁定到 `=0.3.23`。
+- **Swagger 示例值校正**（审查 S-4）：`system` 响应的 `version` 示例更新为 `0.5.0`
+  （与 `Cargo.toml` 同步），`database_status` 示例改为实际值 `not_checked`。
+- **移除未使用的环境变量**（审查 S-6）：删除 `.env` / `.env-example` 中未被代码读取的
+  `UPLOAD_IMAGE_MAX_BYTES`。
+
+### 说明
+
+- 未知路由 404 仍返回 axum 内置纯文本（审查 S-7）：提取器错误与 404/405 不属于统一
+  响应结构，测试只锁定状态码契约，维持既有取舍。
+- 以下设计取舍经确认保持现状，生产上线前需收紧：CORS 全开放
+  （`CorsLayer::permissive`）、`/system/health` 不查询数据库（`database_status` 固定
+  `not_checked`，由 `/system/ready` 负责真实探测）、调试专用 `force_fail` 语义、
+  `examples` 接口纯内存固定数据。
+
 ### 文档
 
 - README 重构为简洁门面文档：只保留项目简介、架构总览与流程图、已内置能力清单、

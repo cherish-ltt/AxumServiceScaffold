@@ -87,13 +87,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy (lints)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --features docs -- -D warnings
 
       - name: Build the project
         run: cargo build --verbose
 
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --features docs --verbose
 
 ```
 
@@ -286,6 +286,20 @@ msrv = "1.99.0"
 - 已推送的 tag 如需补充或修正 message，先删除本地与远程 tag 再重打重推
   （`git tag -d` + `git push origin :refs/tags/<tag>`），避免 tag 内容与实际发布不符。
 
+### 10.9 OpenAPI 文档（`docs` feature）
+
+- Swagger UI 与 OpenAPI 文档（`src/docs.rs`、`utoipa`/`utoipa-swagger-ui`）统一由
+  `cfg(feature = "docs")`（Cargo 的 `docs` feature）门控，**禁止**回到
+  `cfg(debug_assertions)`：`docs` feature 不进 `default`，release 与默认构建均不编译
+  utoipa 及其文档代码。开发时用 `cargo run --features docs` 访问 `/swagger-ui` 与
+  `/api-doc/openapi.json`。
+- 仅调试专用的开发行为（dev-login / dev-transfer 路由注册、DTO 的 `force_fail` 字段
+  与 `From` 实现等）仍使用 `cfg(debug_assertions)`，与文档开关相互独立。
+- controller / DTO 上的 `#[cfg_attr(debug_assertions, utoipa::path(...))]`、
+  `derive(ToSchema/IntoParams)`、`schema(example=...)` 等注解改投 `feature = "docs"`；
+  CI 的 clippy 与 test 步骤使用 `--features docs`（见第 2 节），确保文档代码也在检查范围内。
+- `system` 响应的 `docs_enabled` 字段跟随 `cfg!(feature = "docs")`。
+
 **本文件是项目的“开发宪法”，所有 pull request 和代码审查均应参照其内容。**
 
 ## 10. 其他追加内容
@@ -334,7 +348,9 @@ msrv = "1.99.0"
 - 含泛型方法的 trait 无法作为 `dyn` 使用，仓储通过泛型参数注入 `services`；对外用例接口（`domain/services`）保持 `dyn` 兼容，由 `container.rs` 装配。
 - 读改写场景必须开启 `IsolationLevel::Serializable` 事务；金额、数量用整数最小单位表示（如 `amount_cents: i64`），禁止浮点。
 - 需要并发控制的表维护自增 `version` 列，更新时一并自增，不做静默覆盖。
-- 新增实体放在 `src/entities` 下独立文件，并在 `infrastructure/databases/schema.rs` 补对应的 `CREATE TABLE`；种子数据必须幂等（`NOT EXISTS` 或等价写法）。
+- 新增实体放在 `src/entities` 下独立文件，并在 `migrations/` 目录新增对应的 sqlx 迁移文件
+  （`CREATE TABLE`，由 `databases::run_migrations` 以 `sqlx::migrate!` 执行）；
+  种子数据必须幂等（`NOT EXISTS` 或等价写法）。
 - 每个事务用例至少覆盖「提交成功」与「中途失败回滚后数据无残留」两类测试，回滚测试需断言失败前状态未被改变。
 - 唯一约束冲突属于客户端可控冲突，在 `From<DbErr>` 中统一映射为 `AppError::Conflict`（409）并透出可读原因，不得当作 500 处理；幂等键一类业务唯一列必须建唯一索引，不能只靠先查后写。
 - 数据库文件不得入库（`.gitignore` 排除）：建表、索引与种子数据必须由启动流程自动完成且幂等，表结构变更需同时提供老库的自动补齐路径。

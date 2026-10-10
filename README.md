@@ -45,7 +45,7 @@ clone 下来即可跑通。
 - **生产可用的中间件栈**：请求 ID / Trace / 安全响应头 / 背压 / 限流 / 超时 / Body 限制 / 压缩，
   参数集中在 `.env`，见 [中间件栈与配置](docs/MIDDLEWARE.md)
 - **事务示例**：一次转账完整演示「启动事务 → 读写数据 → 提交 / 回滚」，见 [事务示例](docs/TRANSACTION.md)
-- **JWT 鉴权**：调试登录与当前用户解析，调试构建下提供 Swagger UI
+- **JWT 鉴权**：调试登录与当前用户解析，OpenAPI 文档与 Swagger UI 由 `docs` feature 提供（不进 release）
 - **日志**：按天滚动文件日志 + 分批落盘 + 启动配置快照，见 [日志](docs/LOGGING.md)
 - **SeaORM**：连接池、连通性检查、幂等建表与种子数据、仓储适配器
 - **克隆即可运行**：数据库文件不入库，首次启动自动完成建表与播种
@@ -94,8 +94,9 @@ DATABASE_URL=sqlite://scaffold.db?mode=rwc
 cargo run
 ```
 
-默认监听 `http://127.0.0.1:8080`，调试构建下可访问 `http://127.0.0.1:8080/swagger-ui` 与
-`http://127.0.0.1:8080/api-doc/openapi.json`。服务收到 Ctrl-C 或 SIGTERM 后会停止接收新请求并优雅关闭。
+默认监听 `http://127.0.0.1:8080`，启用 `docs` feature 的构建（开发时 `cargo run --features docs`）可访问
+`http://127.0.0.1:8080/swagger-ui` 与 `http://127.0.0.1:8080/api-doc/openapi.json`。服务收到 Ctrl-C 或 SIGTERM
+后会停止接收新请求并优雅关闭。
 
 健康检查语义：
 

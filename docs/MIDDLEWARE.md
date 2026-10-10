@@ -29,7 +29,7 @@
 | 11 | `LoadShedLayer` | 限流窗口未重置时快速拒绝，而不是让请求挂着等窗口 | `429` |
 | 12 | `RateLimitLayer` | 进程级全局限速（每个周期 N 个请求） | 超出 → `429` |
 | 13 | `CompressionLayer` | 按 `Accept-Encoding` 压缩响应，>32 字节且非图片/gRPC/SSE 才压缩 | — |
-| 14 | `TimeoutLayer` | 单个请求的整体超时（含排队与下游耗时） | `408` |
+| 14 | `TimeoutLayer` | 单个请求处理超时（进入本层后至响应产生的耗时，外层排队不计入；排队由 `ConcurrencyLimit` + `Buffer` 承担） | `408` |
 | 15 | `RequestBodyLimitLayer` | 请求体大小上限，按 `Content-Length` 先行拒绝 | `413` |
 | 16 | `CorsLayer` | 跨域 | — |
 
