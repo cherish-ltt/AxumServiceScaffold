@@ -7,7 +7,7 @@
 ```json
 {
   "code": 200,
-  "message": "成功",
+  "message": "Success",
   "data": {},
   "timestamp": 1713179523000
 }

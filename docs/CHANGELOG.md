@@ -47,6 +47,14 @@
   （与 `Cargo.toml` 同步），`database_status` 示例改为实际值 `not_checked`。
 - **移除未使用的环境变量**（审查 S-6）：删除 `.env` / `.env-example` 中未被代码读取的
   `UPLOAD_IMAGE_MAX_BYTES`。
+- **运行时输出英文化**：日志消息、API `message` 与错误消息、中间件文案、OpenAPI
+  description / schema example、示例与种子数据改为英文（测试内 `expect`/`assert` 失败
+  消息与代码注释、`docs/`、SQL 注释保持中文）；`src/` 下 20 余个文件与 `tests/`
+  断言语义同步，对外消息结构不变。
+- **启动配置改为 ASCII 列表框**：`log_startup_config` 由六条结构化 `info!` 改为单条
+  多行手绘 ASCII 框（`+====+` 标题 + 六组 `key=value` 行），纯 ASCII 字符避免乱码，
+  键仍输出为 `key=value`（如 `batch_max_events=50`）以兼容既有断言；
+  `docs/LOGGING.md`「启动配置日志」同步。
 
 ### 说明
 
