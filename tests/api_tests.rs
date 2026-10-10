@@ -88,7 +88,7 @@ async fn read_json(response: Response) -> Value {
         .await
         .expect("响应体可读取")
         .to_bytes();
-    serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+    serde_json::from_slice(&bytes).expect("响应体应为合法 JSON")
 }
 
 async fn send(app: Router, request: Request<Body>) -> (StatusCode, Value) {
@@ -133,7 +133,8 @@ fn post_json_with_bearer(uri: &str, token: &str, body: Value) -> Request<Body> {
         .expect("构造带令牌的 POST 请求")
 }
 
-/// 通过调试登录接口获取访问令牌。
+/// 通过调试登录接口获取访问令牌（dev-login 路由仅在调试构建注册）。
+#[cfg(debug_assertions)]
 async fn issue_dev_token(app: &Router) -> String {
     let (status, body) = send(
         app.clone(),
@@ -159,7 +160,7 @@ async fn root_returns_service_info() {
     assert_eq!(body["code"], 200);
     assert_eq!(body["data"]["service_name"], "axum-service-scaffold");
     assert_eq!(body["data"]["version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(body["data"]["docs_enabled"], true);
+    assert_eq!(body["data"]["docs_enabled"], cfg!(feature = "docs"));
 }
 
 #[tokio::test]
@@ -184,6 +185,7 @@ async fn ready_confirms_database() {
     assert!(body.get("data").is_none(), "无数据时不应输出 data 字段");
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn dev_login_issues_bearer_token() {
     let app = setup_app().await;
@@ -208,6 +210,7 @@ async fn dev_login_issues_bearer_token() {
     );
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn dev_login_rejects_blank_username() {
     let app = setup_app().await;
@@ -222,6 +225,7 @@ async fn dev_login_rejects_blank_username() {
     assert!(body["message"].as_str().unwrap_or("").contains("用户名"));
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn dev_login_applies_default_role_and_generated_user_id() {
     let app = setup_app().await;
@@ -234,6 +238,7 @@ async fn dev_login_applies_default_role_and_generated_user_id() {
     assert!(!body["data"]["user_id"].as_str().unwrap_or("").is_empty());
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn dev_login_keeps_explicit_user_id_and_roles() {
     let app = setup_app().await;
@@ -386,6 +391,7 @@ async fn example_detail_requires_bearer_token() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn example_detail_returns_requester_info() {
     let app = setup_app().await;
@@ -398,11 +404,11 @@ async fn example_detail_returns_requester_info() {
     assert_eq!(body["data"]["roles"], json!(["developer"]));
 }
 
-#[cfg(debug_assertions)]
+#[cfg(feature = "docs")]
 #[tokio::test]
 async fn swagger_ui_is_mounted_in_debug() {
     let app = setup_app().await;
-    let (status, _) = send(app, get("/swagger-ui")).await;
+    let status = send_response(app, get("/swagger-ui")).await.status();
 
     // Swagger UI 挂载在 /swagger-ui，未带斜杠访问时会 303 重定向到 /swagger-ui/。
     assert!(
@@ -411,7 +417,7 @@ async fn swagger_ui_is_mounted_in_debug() {
     );
 }
 
-#[cfg(debug_assertions)]
+#[cfg(feature = "docs")]
 #[tokio::test]
 async fn openapi_document_is_served() {
     let app = setup_app().await;
@@ -446,13 +452,16 @@ async fn openapi_document_is_served() {
 #[tokio::test]
 async fn unknown_route_returns_404() {
     let app = setup_app().await;
-    let (status, _) = send(app, get("/api/v1/unknown")).await;
+    let status = send_response(app, get("/api/v1/unknown")).await.status();
 
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+/// dev-transfer 路由仅在调试构建注册（见 transaction_controller.rs）。
+#[cfg(debug_assertions)]
 const DEV_TRANSFER: &str = "/api/v1/transactions/dev-transfer";
 
+#[cfg(debug_assertions)]
 fn transfer_body(amount_cents: i64) -> Value {
     json!({
         "from_account_id": "acc_alice",
@@ -462,6 +471,7 @@ fn transfer_body(amount_cents: i64) -> Value {
     })
 }
 
+#[cfg(debug_assertions)]
 fn transfer_body_with_request_id(amount_cents: i64, request_id: &str) -> Value {
     let mut payload = transfer_body(amount_cents);
     payload["request_id"] = json!(request_id);
@@ -469,6 +479,7 @@ fn transfer_body_with_request_id(amount_cents: i64, request_id: &str) -> Value {
 }
 
 /// 同一事务写入的余额、流水与审计日志，提交后应当全部可见。
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn transfer_commits_balances_record_and_audits() {
     let app = setup_app().await;
@@ -510,6 +521,7 @@ async fn transfer_commits_balances_record_and_audits() {
 }
 
 /// 跨表写入过程中命中幂等键唯一约束：整体回滚并返回 409。
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn duplicate_request_id_returns_conflict_without_extra_writes() {
     let app = setup_app().await;
@@ -558,6 +570,7 @@ async fn duplicate_request_id_returns_conflict_without_extra_writes() {
     assert_eq!(second["data"]["from_balance_after_cents"], 79000);
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn transfer_requires_bearer_token() {
     let app = setup_app().await;
@@ -567,6 +580,7 @@ async fn transfer_requires_bearer_token() {
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn transfer_rejects_insufficient_balance_without_writing() {
     let app = setup_app().await;
@@ -586,6 +600,7 @@ async fn transfer_rejects_insufficient_balance_without_writing() {
     assert_eq!(list["data"]["total"], 0);
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn transfer_rejects_unknown_account_with_404() {
     let app = setup_app().await;
@@ -631,6 +646,7 @@ async fn transfer_rolls_back_every_write_when_force_fail_is_on() {
     assert_eq!(body["data"]["from_balance_after_cents"], 80000);
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn transfer_list_paginates_and_rejects_bad_paging() {
     let app = setup_app().await;
@@ -666,6 +682,7 @@ async fn transfer_list_paginates_and_rejects_bad_paging() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn unknown_transfer_record_returns_404() {
     let app = setup_app().await;
@@ -713,6 +730,7 @@ async fn success_response_follows_the_unified_envelope() {
     assert_unified_envelope(status, &headers, &body);
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn error_responses_follow_the_unified_envelope() {
     let app = setup_app().await;
@@ -749,7 +767,10 @@ async fn malformed_json_body_is_rejected_with_400() {
         .body(Body::from("{not json}"))
         .expect("构造请求");
 
-    assert_eq!(send(app, request).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        send_response(app, request).await.status(),
+        StatusCode::BAD_REQUEST
+    );
 }
 
 #[tokio::test]
@@ -762,7 +783,7 @@ async fn missing_json_content_type_is_rejected_with_415() {
         .expect("构造请求");
 
     assert_eq!(
-        send(app, request).await.0,
+        send_response(app, request).await.status(),
         StatusCode::UNSUPPORTED_MEDIA_TYPE
     );
 }
@@ -770,7 +791,9 @@ async fn missing_json_content_type_is_rejected_with_415() {
 #[tokio::test]
 async fn json_body_missing_required_field_is_rejected_with_422() {
     let app = setup_app().await;
-    let (status, _) = send(app, post_json("/api/v1/examples/echo", json!({}))).await;
+    let status = send_response(app, post_json("/api/v1/examples/echo", json!({})))
+        .await
+        .status();
 
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
@@ -778,7 +801,9 @@ async fn json_body_missing_required_field_is_rejected_with_422() {
 #[tokio::test]
 async fn non_numeric_query_param_is_rejected_with_400() {
     let app = setup_app().await;
-    let (status, _) = send(app, get("/api/v1/examples?size=abc")).await;
+    let status = send_response(app, get("/api/v1/examples?size=abc"))
+        .await
+        .status();
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
@@ -901,6 +926,7 @@ async fn expired_token_is_rejected_with_401() {
     );
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn dev_login_with_empty_roles_falls_back_to_default_role() {
     let app = setup_app().await;

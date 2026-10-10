@@ -38,6 +38,8 @@ fn capture_logs() -> Arc<LogBuffer> {
         .with_max_level(tracing::Level::INFO)
         .with_span_events(FmtSpan::NEW)
         .finish();
+    // set_global_default 进程级只能安装一次，panic 后无法恢复：本文件必须独占进程运行
+    //（顶层注释已说明 callsite interest 缓存同样是进程级的，见 middleware_log_tests.rs 头部）。
     tracing::subscriber::set_global_default(subscriber).expect("安装全局日志订阅者");
     tracing::callsite::rebuild_interest_cache();
     buffer

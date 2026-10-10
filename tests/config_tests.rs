@@ -21,13 +21,32 @@ fn remove_var(key: &str) {
     unsafe { env::remove_var(key) };
 }
 
-/// 临时设置环境变量后执行断言，结束时恢复原始值。
+/// 断言结束（含 panic）时恢复环境变量的守卫：panic 展开也会执行 Drop。
+struct EnvRestore {
+    saved: Vec<(String, Option<String>)>,
+}
+
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        for (key, value) in &self.saved {
+            match value {
+                Some(value) => set_var(key, value),
+                None => remove_var(key),
+            }
+        }
+    }
+}
+
+/// 临时设置环境变量后执行断言，结束时（含断言 panic）恢复原始值。
 fn with_env<F: FnOnce()>(vars: &[(&str, Option<&str>)], assertion: F) {
     let _lock = env_lock();
     let saved: Vec<(String, Option<String>)> = vars
         .iter()
         .map(|(key, _)| (key.to_string(), env::var(key).ok()))
         .collect();
+
+    // 先挂上恢复守卫，再改环境变量：无论 assertion 是否 panic，都会恢复。
+    let _restore = EnvRestore { saved };
 
     for (key, value) in vars {
         match value {
@@ -37,13 +56,6 @@ fn with_env<F: FnOnce()>(vars: &[(&str, Option<&str>)], assertion: F) {
     }
 
     assertion();
-
-    for (key, value) in saved {
-        match value {
-            Some(value) => set_var(&key, &value),
-            None => remove_var(&key),
-        }
-    }
 }
 
 const EXAMPLE_SECRET: &str = "change-me-to-a-random-string-with-at-least-32-characters";

@@ -93,10 +93,16 @@ fn logs_are_flushed_on_fixed_interval() {
     for i in 0..3 {
         tracing::info!("间隔刷盘第 {i} 条");
     }
-    // 未满 100 条、间隔 1s：等待定时线程按间隔落盘
-    thread::sleep(Duration::from_millis(1500));
-
-    let logs = read_logs(&out_dir);
+    // 未满 100 条、间隔 1s：轮询等待定时线程落盘，避免固定 sleep 造成的时序抖动。
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let mut logs;
+    loop {
+        logs = read_logs(&out_dir);
+        if logs.contains("间隔刷盘第 2 条") || std::time::Instant::now() > deadline {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
     assert!(
         logs.contains("间隔刷盘第 0 条")
             && logs.contains("间隔刷盘第 1 条")

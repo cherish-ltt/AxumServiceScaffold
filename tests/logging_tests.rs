@@ -68,11 +68,16 @@ fn logging_init_creates_log_file_in_configured_dir() {
     tracing::info!("logging 初始化测试日志");
     drop(guard);
 
-    let entries = std::fs::read_dir(&out_dir).expect("读取日志目录");
+    // 不只断言文件存在，还要断言写入的内容确实落盘（BatchGuard drop 时落盘剩余缓冲）。
+    let mut contents = String::new();
+    for entry in std::fs::read_dir(&out_dir).expect("读取日志目录").flatten() {
+        if entry.path().is_file() {
+            contents.push_str(&std::fs::read_to_string(entry.path()).expect("读取日志文件"));
+        }
+    }
     assert!(
-        entries.count() > 0,
-        "日志目录中应已创建日志文件: {}",
-        out_dir.display()
+        contents.contains("logging 初始化测试日志"),
+        "日志文件应包含写入的日志行，实际内容:\n{contents}"
     );
 }
 
