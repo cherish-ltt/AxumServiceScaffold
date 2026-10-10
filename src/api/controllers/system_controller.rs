@@ -9,7 +9,7 @@ use crate::{
     response::ApiResponse,
 };
 
-#[cfg(debug_assertions)]
+#[cfg(feature = "docs")]
 use crate::docs::{DocErrorResponse, DocHealthResponse, DocMessageResponse, DocWelcomeResponse};
 
 pub fn router() -> Router<Arc<Container>> {
@@ -18,7 +18,7 @@ pub fn router() -> Router<Arc<Container>> {
         .route("/system/ready", get(ready))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/",
     tag = "System",
@@ -33,7 +33,7 @@ pub async fn root(
     Ok(ApiResponse::ok(welcome.into()))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/system/health",
     tag = "System",
@@ -50,7 +50,7 @@ pub async fn health(
     Ok(ApiResponse::ok_with_message("健康检查完成", health.into()))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/system/ready",
     tag = "System",

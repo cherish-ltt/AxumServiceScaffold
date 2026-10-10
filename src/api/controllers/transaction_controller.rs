@@ -19,12 +19,12 @@ use crate::{
 use axum::{Json, routing::post};
 
 #[cfg(debug_assertions)]
-use crate::{
-    api::dto::transaction::{TransferReceiptResponse, TransferRequest},
-    docs::{
-        DocErrorResponse, DocTransferDetailResponse, DocTransferListResponse,
-        DocTransferReceiptResponse,
-    },
+use crate::api::dto::transaction::{TransferReceiptResponse, TransferRequest};
+
+#[cfg(feature = "docs")]
+use crate::docs::{
+    DocErrorResponse, DocTransferDetailResponse, DocTransferListResponse,
+    DocTransferReceiptResponse,
 };
 
 pub fn router() -> Router<Arc<Container>> {
@@ -38,7 +38,7 @@ pub fn router() -> Router<Arc<Container>> {
     router
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/transactions",
     tag = "Transaction",
@@ -65,7 +65,7 @@ pub async fn list_transfers(
     Ok(ApiResponse::ok(page.into()))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/transactions/{id}",
     tag = "Transaction",
@@ -95,7 +95,7 @@ pub async fn get_transfer(
 ///
 /// release 构建不会注册该路由，事务示例请参考 `services/transaction.rs`。
 #[cfg(debug_assertions)]
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     post,
     path = "/api/v1/transactions/dev-transfer",
     tag = "Transaction",

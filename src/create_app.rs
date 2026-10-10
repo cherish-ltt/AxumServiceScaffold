@@ -12,7 +12,7 @@ pub fn create_app(container: Arc<Container>) -> Router {
         .layer(CorsLayer::permissive())
         .with_state(Arc::clone(&container));
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "docs")]
     let app = crate::docs::mount(app);
 
     crate::middleware::apply(app, &container.config.middleware)

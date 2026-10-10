@@ -19,7 +19,7 @@ use crate::{
     response::ApiResponse,
 };
 
-#[cfg(debug_assertions)]
+#[cfg(feature = "docs")]
 use crate::docs::{
     DocErrorResponse, DocExampleDetailResponse, DocExampleEchoResponse, DocExampleListResponse,
 };
@@ -31,7 +31,7 @@ pub fn router() -> Router<Arc<Container>> {
         .route("/examples/{id}", get(get_example))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     post,
     path = "/api/v1/examples/echo",
     tag = "Example",
@@ -56,7 +56,7 @@ pub async fn create_echo(
     ))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/examples",
     tag = "Example",
@@ -76,7 +76,7 @@ pub async fn list_examples(
     Ok(ApiResponse::ok(list.into()))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/examples/{id}",
     tag = "Example",

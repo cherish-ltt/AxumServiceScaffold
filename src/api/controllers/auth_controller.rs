@@ -15,7 +15,7 @@ use crate::{
     response::ApiResponse,
 };
 
-#[cfg(debug_assertions)]
+#[cfg(feature = "docs")]
 use crate::docs::{DocAccessTokenResponse, DocCurrentUserResponse, DocErrorResponse};
 
 pub fn router() -> Router<Arc<Container>> {
@@ -27,7 +27,7 @@ pub fn router() -> Router<Arc<Container>> {
     router
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     post,
     path = "/api/v1/auth/dev-login",
     tag = "Auth",
@@ -52,7 +52,7 @@ pub async fn dev_login(
     ))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/auth/me",
     tag = "Auth",

@@ -3,7 +3,7 @@
 pub mod api;
 pub mod container;
 pub mod create_app;
-#[cfg(debug_assertions)]
+#[cfg(feature = "docs")]
 pub mod docs;
 pub mod domain;
 pub mod entities;

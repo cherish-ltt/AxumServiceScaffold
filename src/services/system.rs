@@ -31,7 +31,7 @@ impl SystemUseCase for SystemService {
             service_name: self.config.app_name.clone(),
             environment: self.config.app_env.clone(),
             version: env!("CARGO_PKG_VERSION").to_string(),
-            docs_enabled: cfg!(debug_assertions),
+            docs_enabled: cfg!(feature = "docs"),
         })
     }
 
