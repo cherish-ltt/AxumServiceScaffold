@@ -6,7 +6,7 @@ rust-version = "1.99.0"
 authors = ["Guardian team"]
 license = "MIT OR Apache-2.0"
 description = "用于快速搭建 Axum + SeaORM 洋葱架构服务的 Rust 脚手架"
-repository = "https://github.com/cherry-llt/Guardian"
+repository = "https://github.com/cherish-ltt/AxumServiceScaffold"
 keywords = ["axum", "swagger", "seaorm", "jwt", "scaffold"]
 categories = ["web-programming", "development-tools"]
 
@@ -23,6 +23,9 @@ preset = [
   "dep:itertools",
 ]
 http-client = ["dep:reqwest"]
+# 仅开发/文档构建启用 Swagger：utoipa 与 swagger-ui 不进入默认与 release 编译
+#（docs_enabled 也跟随该 feature，见 services/system.rs）。
+docs = ["dep:utoipa", "dep:utoipa-swagger-ui"]
 
 [dependencies]
 # 错误处理与抽象
@@ -63,6 +66,14 @@ sea-orm = { version = "=2.0.4", features = [
   "runtime-tokio-rustls",
   "macros",
 ] }
+
+# SQL 迁移（与 sea-orm 共用同一 sqlx 版本，避免重复编译；TLS 后端由 sea-orm 侧并集提供）
+sqlx = { version = "=0.9.0", default-features = false, features = [
+  "runtime-tokio",
+  "sqlite",
+  "migrate",
+  "macros",
+] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 validator = { version = "=0.21.0", features = ["derive"], optional = true }
@@ -72,8 +83,8 @@ argon2 = "=0.6.0"
 jsonwebtoken = { version = "=11", features = ["aws_lc_rs"] }
 
 # 可观测性
-tracing = "=0.1"
-tracing-subscriber = { version = "=0.3", features = [
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = [
   "env-filter",
   "fmt",
   "time",
@@ -82,9 +93,12 @@ tracing-subscriber = { version = "=0.3", features = [
 tracing-appender = "=0.2.5"
 time = { version = "=0.3.55", features = ["macros"] }
 
-# OpenAPI 与调试文档
-utoipa = "=6.0.0"
-utoipa-swagger-ui = { version = "=10.0.1", features = ["axum", "vendored"] }
+# OpenAPI 与调试文档（需要时通过 --features docs 启用）
+utoipa = { version = "=6.0.0", optional = true }
+utoipa-swagger-ui = { version = "=10.0.1", features = [
+  "axum",
+  "vendored",
+], optional = true }
 
 # 常用外部调用与标识工具
 reqwest = { version = "=0.13.5", default-features = false, features = [

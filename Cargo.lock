@@ -414,6 +414,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror",
  "time",
  "tokio",
@@ -3208,6 +3209,7 @@ dependencies = [
  "sqlx-postgres",
  "sqlx-sqlite",
  "syn 2.0.117",
+ "thiserror",
  "tokio",
  "url",
 ]
