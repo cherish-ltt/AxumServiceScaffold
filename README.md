@@ -84,7 +84,9 @@ Copy-Item .env-example .env
 DATABASE_URL=sqlite://scaffold.db?mode=rwc
 ```
 
-因此可以在不额外安装 MySQL/PostgreSQL 的前提下直接启动。数据库文件（`scaffold.db`）被 `.gitignore`
+因此可以在不额外安装 MySQL/PostgreSQL 的前提下直接启动。**当前只支持 SQLite**：迁移文件与
+补列/建索引逻辑都是 SQLite 语法（`pragma_table_info`），`DATABASE_URL` 填非 `sqlite://` 的连接串
+会在启动时被直接拒绝，而不是运行到一半才失败。数据库文件（`scaffold.db`）被 `.gitignore`
 排除，不入库；首次启动或首次跑测试时自动完成初始化：建表 → 补列建索引 → 播种演示账户
 （`acc_alice`、`acc_bob`，各 100000 分），初始化幂等，重复启动不会重复建表或重复播种。
 需要恢复到干净演示状态时，直接删除 `scaffold.db` 再启动即可。

@@ -508,3 +508,27 @@ fn zero_middleware_capacity_is_rejected() {
         );
     }
 }
+
+/// 脚手架只支持 SQLite：迁移文件与补列逻辑都依赖 SQLite 语法，其他后端必须启动即拒。
+#[test]
+fn non_sqlite_database_url_is_rejected() {
+    for url in [
+        "postgres://localhost/app",
+        "mysql://localhost/app",
+        "app.db",
+    ] {
+        with_env(
+            &[
+                ("JWT_SECRET", Some(CUSTOM_SECRET)),
+                ("DATABASE_URL", Some(url)),
+            ],
+            || {
+                let error = AppConfig::from_env().expect_err("非 SQLite 连接串应被拒绝");
+                assert!(
+                    error.to_string().contains("only supports sqlite:// URLs"),
+                    "{url} 的报错信息不符合预期: {error}"
+                );
+            },
+        );
+    }
+}

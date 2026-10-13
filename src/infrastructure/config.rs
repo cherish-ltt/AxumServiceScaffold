@@ -138,6 +138,14 @@ impl AppConfig {
                 "invalid database pool parameters: expected 0 < min_connections <= max_connections"
             ));
         }
+        // 迁移文件与补列逻辑都依赖 SQLite 语法（pragma_table_info / sqlite 后端），
+        // 其他后端会在启动时以难以定位的方式失败，所以在这里直接拒绝。
+        let scheme = database.url.split(':').next().unwrap_or_default();
+        if scheme != "sqlite" {
+            return Err(anyhow!(
+                "unsupported DATABASE_URL scheme `{scheme}`: this scaffold only supports sqlite:// URLs"
+            ));
+        }
         if database.connect_timeout_secs == 0 || database.idle_secs == 0 {
             return Err(anyhow!(
                 "database connect timeout and idle timeout must be greater than 0"

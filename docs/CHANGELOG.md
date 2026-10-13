@@ -17,6 +17,10 @@
   改为 `./log`（不写环境变量时不再向系统目录写入，普通用户与容器内可直启动），
   `DATABASE_IDLE_SECS` 由 `30` 改为 `60`；`tests/config_tests.rs` 断言与 `docs/LOGGING.md`
   参数表同步。
+- **`DATABASE_URL` 显式限制为 SQLite**：迁移文件与 `schema.rs` 的补列/索引都是 SQLite 语法，
+  非 `sqlite:` 连接串会在启动时以难以定位的方式失败。现由 `AppConfig::from_env` 校验 scheme 并
+  报错退出（只输出 scheme，不回显完整连接串以免泄露口令）；`tests/config_tests.rs`
+  补 `postgres://` / `mysql://` / 裸路径三类用例，README 与 AGENTS.md 10.5 同步说明。
 - **`LOG_FILTER` 非法不再静默回退**：`logging::init` 原先用
   `unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"))`，过滤规则写错时会静默换一套
   级别运行（与“非法配置即拒绝启动”的约定相悳）。现改为 `with_context(...)?` 报错退出，

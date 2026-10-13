@@ -387,6 +387,9 @@ msrv = "1.99.0"
 - 新增实体放在 `src/entities` 下独立文件，并在 `migrations/` 目录新增对应的 sqlx 迁移文件
   （`CREATE TABLE`，由 `databases::run_migrations` 以 `sqlx::migrate!` 执行）；
   种子数据必须幂等（`NOT EXISTS` 或等价写法）。
+- **当前只支持 SQLite**：迁移文件与 `schema.rs` 的补列/索引逻辑都是 SQLite 语法
+  （`pragma_table_info`）。`DATABASE_URL` 必须在 `AppConfig::from_env` 阶段校验为 `sqlite:` 开头，
+  非法 scheme 拒绝启动；要换 MySQL/PostgreSQL 必须同时把迁移与补列逻辑重写成后端无关的写法。
 - 每个事务用例至少覆盖「提交成功」与「中途失败回滚后数据无残留」两类测试，回滚测试需断言失败前状态未被改变。
 - 唯一约束冲突属于客户端可控冲突，在 `From<DbErr>` 中统一映射为 `AppError::Conflict`（409），
   响应文案用稳定描述（如 `resource already exists`），**不得**把数据库原始 detail（含表名、列名）
