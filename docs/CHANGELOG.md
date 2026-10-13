@@ -121,13 +121,18 @@
 
 - 未知路由 404 仍返回 axum 内置纯文本（审查 S-7）：提取器错误与 404/405 不属于统一
   响应结构，测试只锁定状态码契约，维持既有取舍。
-- 以下设计取舍经确认保持现状，生产上线前需收紧：CORS 全开放
-  （`CorsLayer::permissive`）、`/system/health` 不查询数据库（`database_status` 固定
+- 以下设计取舍经确认保持现状：`/system/health` 不查询数据库（`database_status` 固定
   `not_checked`，由 `/system/ready` 负责真实探测）、调试专用 `force_fail` 语义、
   `examples` 接口纯内存固定数据。
 
 ### 文档
 
+- **过时描述修正**：`docs/DEVELOPMENT.md` 与 `docs/ARCHITECTURE.md` 仍写「在
+  `infrastructure/databases/schema.rs` 建表」，实际建表早已迁到 `migrations/`
+  （`schema.rs` 只做老库补列、补索引与幂等播种），已改为现状描述并补上
+  「只支持 SQLite」的说明；`docs/RESPONSE.md` 的 `timestamp` 由「毫秒级本地时间戳」
+  更正为「Unix epoch 毫秒（UTC 基准）」；README 的健康检查说明由「失败时不应继续接收
+  流量」改为如实描述（`/health` 恒 200、不查库，接流与否请看 `/ready`）。
 - README 重构为简洁门面文档：只保留项目简介、架构总览与流程图、已内置能力清单、
   文档导航、快速开始、默认接口、贡献指南与许可证；中间件栈与配置、事务示例、
   统一响应结构、日志、测试与构建检查、扩展开发等详情内容拆分到 `docs/` 下独立 md

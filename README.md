@@ -103,7 +103,9 @@ cargo run
 
 健康检查语义：
 
-- `/api/v1/system/health`：进程存活检查，不依赖数据库，失败时不应继续接收流量。
+- `/api/v1/system/health`：进程存活检查，固定返回 `200` 且 `database_status` 为 `not_checked`，
+  不查询数据库；它只证明进程还能响应 HTTP，**不代表依赖已就绪**，
+  编排系统应当用 `/ready` 决定是否接入流量。
 - `/api/v1/system/ready`：数据库就绪检查，数据库不可用时返回 `503 Service Unavailable`。
 
 > 开发登录接口（`POST /api/v1/auth/dev-login`）仅在 debug 构建提供，release 构建不存在该入口；

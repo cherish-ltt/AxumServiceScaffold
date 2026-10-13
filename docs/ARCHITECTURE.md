@@ -95,7 +95,7 @@ src
 ├─ infrastructure
 │  ├─ databases
 │  │  ├─ mod.rs
-│  │  └─ schema.rs         # 建表与幂等种子数据
+│  │  └─ schema.rs         # 老库补列/补索引/幂等种子（建表在 migrations/）
 │  ├─ repositories
 │  │  ├─ mod.rs
 │  │  └─ transaction.rs    # 转账仓储接口 + SeaORM 实现
@@ -165,7 +165,7 @@ src
 外部世界的实现层：
 
 - 环境配置读取
-- SeaORM 数据库连接、建表与种子数据
+- SeaORM 数据库连接、版本化迁移（`migrations/`）与老库补列/索引/种子数据
 - JWT 签发与校验
 - 仓储适配器（接口 + SeaORM 实现）
 
@@ -190,8 +190,12 @@ src
 这个脚手架没有改掉 SeaORM，而是把它放回更合理的位置：
 
 - 实体统一放在 `src/entities`
-- 数据库连接、建表与种子数据在 `src/infrastructure/databases`
+- 数据库连接在 `src/infrastructure/databases`；建表在 `migrations/`（由 `sqlx::migrate!` 执行），
+  老库补列、补索引与幂等种子在 `src/infrastructure/databases/schema.rs`
 - 仓储接口与实现放在 `src/infrastructure/repositories`
+
+> 迁移与补列逻辑都是 SQLite 语法，当前脚手架只支持 `sqlite://` 的连接串
+> （非 SQLite 的 `DATABASE_URL` 会在启动时被 `AppConfig::from_env` 拒绝）。
 
 事务也遵循同一套边界：
 
