@@ -9,6 +9,12 @@
 
 ### 修复
 
+- **SQLite 事务隔离级别失效**：转账事务原本以 `IsolationLevel::Serializable` 开启，
+  但 sea-orm 在 SQLite 上会**忽略隔离级别**（只打一条 warn），实际始终是 `BEGIN DEFERRED`，
+  既让文档承诺落空，又让每次转账都写一条误导性告警。现改用
+  `begin_with_options(sqlite_transaction_mode = IMMEDIATE)`，在 `BEGIN` 时就取得写锁，
+  消除 DEFERRED 下「读后升级写锁」的冲突窗口；`docs/TRANSACTION.md` 与 `AGENTS.md`
+  第 10.5 节同步说明「控制并发用事务模式而非隔离级别」。
 - **`--release --features docs` 构建断裂**：`docs` feature 与 `debug_assertions` 是两个
   正交开关，`utoipa::path` 只为 debug 专用 handler 生成路由元数据，而
   `src/docs.rs` 的 `OpenApi` 无条件引用 `dev_login` / `dev_transfer`，导致

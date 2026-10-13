@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Local;
-use sea_orm::{DatabaseConnection, DatabaseTransaction, IsolationLevel, TransactionTrait};
+use sea_orm::{
+    DatabaseConnection, DatabaseTransaction, SqliteTransactionMode, TransactionOptions,
+    TransactionTrait,
+};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -47,9 +50,14 @@ impl<R: TransferRepository> TransferUseCase for TransferService<R> {
         validate(&command)?;
 
         // 参数校验放在开启事务之前，避免为必然失败的请求占用连接。
+        // SQLite 不支持在事务内设置隔离级别（`IsolationLevel` 会被忽略）；改用 IMMEDIATE
+        // 让 BEGIN 时就拿到写锁，避免 DEFERRED 下并发读改写互相覆盖。
         let transaction = self
             .database
-            .begin_with_config(Some(IsolationLevel::Serializable), None)
+            .begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
             .await?;
 
         match transfer_in_transaction(&transaction, self.repository.as_ref(), &command).await {
@@ -514,6 +522,45 @@ mod tests {
         assert_eq!(balance(&database, ALICE).await, 80000);
         assert_eq!(balance(&database, BOB).await, 120000);
         assert_eq!(record_count(&database).await, 1);
+    }
+
+    /// 并发扣减不会丢失更新，也不会把锁竞争暴露成数据库错误。
+    ///
+    /// alice 初始 100000，5 笔各 30000 同时发起：只可能有 3 笔成功，且失败的 2 笔必须是
+    /// 「余额不足」（读到已提交的余额）而非 `AppError::Database`。写事务以 BEGIN IMMEDIATE
+    /// 开启，写锁在事务开始时就取得，不会出现 DEFERRED 下「读后升级锁」的冲突窗口。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_transfers_serialize_without_losing_updates() {
+        let (service, database) = setup().await;
+        let service = Arc::new(service);
+
+        let mut handles = Vec::new();
+        for _ in 0..5 {
+            let service = Arc::clone(&service);
+            handles.push(tokio::spawn(async move {
+                service.transfer(command(ALICE, BOB, 30000)).await
+            }));
+        }
+
+        let mut outcomes = Vec::new();
+        for handle in handles {
+            outcomes.push(handle.await.expect("并发任务不应 panic"));
+        }
+
+        let committed = outcomes.iter().filter(|outcome| outcome.is_ok()).count();
+        let rejected = outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, Err(AppError::BadRequest(_))))
+            .count();
+        assert_eq!(committed, 3, "只有 3 笔能扣满 100000");
+        assert_eq!(
+            rejected, 2,
+            "其余请求应是余额不足而非数据库错误: {outcomes:?}"
+        );
+
+        assert_eq!(balance(&database, ALICE).await, 10000);
+        assert_eq!(balance(&database, BOB).await, 190000);
+        assert_eq!(record_count(&database).await, 3);
     }
 
     #[tokio::test]

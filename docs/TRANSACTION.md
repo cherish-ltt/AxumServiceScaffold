@@ -8,7 +8,7 @@
 
 ```text
 services/transaction.rs
-  begin_with_config(Serializable)
+  begin_with_options(sqlite_transaction_mode = IMMEDIATE)
     ├─ 读：查询转出/转入账户余额（事务内）
     ├─ 校验：账户存在、非同一账户、金额 > 0、余额充足
     ├─ 写：扣减转出余额、增加转入余额、写流水、写审计日志
@@ -66,7 +66,11 @@ curl -s "http://127.0.0.1:8080/api/v1/transactions/<record_id>" -H "Authorizatio
 - **仓储方法接收 `C: ConnectionTrait`**：传入 `&DatabaseConnection` 表示不进事务，传入 `&DatabaseTransaction` 表示在调用方事务内执行，同一套方法两处复用。
 - **写入全部完成后才提交**：任何一步返回 `Err` 都会回滚，包括余额不足这类业务错误。
 - **金额用整数分**：`amount_cents: i64`，不使用浮点；账户表用自增 `version` 暴露并发丢失更新。
-- **并发安全**：事务以 `IsolationLevel::Serializable` 开启（SQLite 下即 `BEGIN IMMEDIATE`），避免「先读余额再扣减」的写偏斜。
+- **并发安全**：写事务以 `SqliteTransactionMode::Immediate` 开启（即 `BEGIN IMMEDIATE`），
+  写锁在事务开始时就取得，避免 DEFERRED 下「先读余额再扣减」的锁升级冲突窗口。
+  注意 `IsolationLevel` 在 SQLite 上**不生效**（sea-orm 只打一条 warn 后忽略），
+  控制并发必须用事务模式而不是隔离级别；锁等待时长由 sqlx 默认的
+  `busy_timeout = 5s` 提供（`SqliteConnectOptions::new()` 的默认值）。
 - **幂等键 `request_id`**：可选。传入时写入 `transfer_records.request_id`（唯一索引），重复提交会命中约束冲突并返回 `409 Conflict`，事务内已完成的余额更新与审计写入一起回滚。
 
 验证回滚是否真的生效（调试构建）：

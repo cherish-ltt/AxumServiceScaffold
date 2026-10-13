@@ -356,7 +356,9 @@ msrv = "1.99.0"
 - 仓储方法签名统一接收 `C: ConnectionTrait`：传入 `&DatabaseConnection` 表示不进事务，传入 `&DatabaseTransaction` 表示在调用方事务内执行；禁止为事务单独复制一套方法。
 - 仓储接口因引用 `sea_orm::ConnectionTrait` 而归入 `infrastructure/repositories`，`domain/repositories` 只保留边界说明；`domain` 不得依赖 `sea-orm`。
 - 含泛型方法的 trait 无法作为 `dyn` 使用，仓储通过泛型参数注入 `services`；对外用例接口（`domain/services`）保持 `dyn` 兼容，由 `container.rs` 装配。
-- 读改写场景必须开启 `IsolationLevel::Serializable` 事务；金额、数量用整数最小单位表示（如 `amount_cents: i64`），禁止浮点。
+- 读改写场景必须开启写事务：SQLite 不支持在事务内切换隔离级别（`IsolationLevel` 会被
+  sea-orm 忽略并打 warn），必须用 `begin_with_options(TransactionOptions { sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate), .. })`；
+  金额、数量用整数最小单位表示（如 `amount_cents: i64`），禁止浮点。
 - 需要并发控制的表维护自增 `version` 列，更新时一并自增，不做静默覆盖。
 - 新增实体放在 `src/entities` 下独立文件，并在 `migrations/` 目录新增对应的 sqlx 迁移文件
   （`CREATE TABLE`，由 `databases::run_migrations` 以 `sqlx::migrate!` 执行）；

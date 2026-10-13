@@ -649,7 +649,7 @@
           "t": "AuthUseCase · ExampleUseCase · SystemUseCase"
         },
         {
-          "t": "TransferUseCase · 转账事务（Serializable）"
+          "t": "TransferUseCase · 转账事务（BEGIN IMMEDIATE）"
         },
         {
           "items": [
