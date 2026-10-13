@@ -17,6 +17,10 @@
   改为 `./log`（不写环境变量时不再向系统目录写入，普通用户与容器内可直启动），
   `DATABASE_IDLE_SECS` 由 `30` 改为 `60`；`tests/config_tests.rs` 断言与 `docs/LOGGING.md`
   参数表同步。
+- **`LOG_FILTER` 非法不再静默回退**：`logging::init` 原先用
+  `unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"))`，过滤规则写错时会静默换一套
+  级别运行（与“非法配置即拒绝启动”的约定相悳）。现改为 `with_context(...)?` 报错退出，
+  并把解析提前到创建文件句柄之前；`tests/logging_tests.rs` 补对应用例，`docs/LOGGING.md` 同步。
 - **分页边界与示例列表一致性**：仓储层 `list_records` 的偏移量改用
   `page.checked_sub(1).and_then(|p| p.checked_mul(size))`，不再依赖「service 已保证 page >= 1」
   （原式 `page - 1` 在 page 为 0 时 debug 下先 panic）；`examples` 列表补上 `page` 上限 10000，

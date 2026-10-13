@@ -45,7 +45,11 @@ pub fn init(config: &AppConfig) -> Result<BatchGuard> {
         format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:5]"),
     );
 
-    // 2. 配置日志滚动策略
+    // 2. 配置日志过滤级别（来自 .env）。先于文件句柄校验，配置非法时不留下任何副作用。
+    let env_filter = EnvFilter::try_new(config.logging.filter.clone())
+        .with_context(|| format!("invalid LOG_FILTER: {}", config.logging.filter))?;
+
+    // 3. 配置日志滚动策略
     let file_appender = RollingFileAppender::builder()
         // 按天切割（同时支持按大小切割，见下文）
         .rotation(config.logging.rotation.clone())
@@ -59,7 +63,7 @@ pub fn init(config: &AppConfig) -> Result<BatchGuard> {
         .build(config.logging.out_dir.clone())
         .context("failed to create log file appender")?;
 
-    // 3. 配置格式化层（输出到文件，分批写入）
+    // 4. 配置格式化层（输出到文件，分批写入）
     let file_writer = BatchFileWriter::new(
         file_appender,
         config.logging.batch_max_events,
@@ -74,12 +78,8 @@ pub fn init(config: &AppConfig) -> Result<BatchGuard> {
         ))
         .with_writer(file_writer.clone());
 
-    // 4. 控制台输出层（带颜色，实时输出）
+    // 5. 控制台输出层（带颜色，实时输出）
     let console_layer = fmt::layer().with_writer(std::io::stdout).with_timer(timer);
-
-    // 5. 配置日志过滤级别（来自 .env）
-    let env_filter = EnvFilter::try_new(config.logging.filter.clone())
-        .unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"));
 
     // 6. 初始化全局订阅者
     tracing_subscriber::registry()

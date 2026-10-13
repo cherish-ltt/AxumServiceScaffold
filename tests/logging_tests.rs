@@ -97,3 +97,18 @@ fn logging_init_rejects_invalid_utc_offset() {
             .contains("invalid log timezone offset configuration")
     );
 }
+
+/// LOG_FILTER 是唯一真值来源：写错时必须拒绝启动，而不是静默换一套过滤规则。
+#[test]
+fn logging_init_rejects_invalid_filter() {
+    let mut config = test_config("/tmp/axum-scaffold-invalid-filter", 8, 0);
+    config.logging.filter = "info,missing=notalevel".to_string();
+
+    match logging::init(&config) {
+        Ok(_) => panic!("非法 LOG_FILTER 应被拒绝"),
+        Err(error) => assert!(
+            error.to_string().contains("invalid LOG_FILTER"),
+            "报错信息不符合预期: {error}"
+        ),
+    }
+}
