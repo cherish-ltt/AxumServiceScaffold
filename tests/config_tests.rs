@@ -102,6 +102,7 @@ fn valid_config_loads_with_defaults() {
             ("MIDDLEWARE_RATE_LIMIT_REQUESTS", None),
             ("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", None),
             ("MIDDLEWARE_HSTS_ENABLED", None),
+            ("MIDDLEWARE_CORS_ALLOWED_ORIGINS", None),
         ],
         || {
             let config = AppConfig::from_env().expect("默认配置应可加载");
@@ -135,6 +136,7 @@ fn valid_config_loads_with_defaults() {
             assert_eq!(config.middleware.rate_limit_requests, 32768);
             assert_eq!(config.middleware.rate_limit_period_secs, 1);
             assert!(!config.middleware.hsts_enabled);
+            assert!(config.middleware.cors_allowed_origins.is_empty());
         },
     );
 }
@@ -419,6 +421,10 @@ fn middleware_overrides_are_applied() {
             ("MIDDLEWARE_RATE_LIMIT_REQUESTS", Some("50")),
             ("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", Some("2")),
             ("MIDDLEWARE_HSTS_ENABLED", Some("true")),
+            (
+                "MIDDLEWARE_CORS_ALLOWED_ORIGINS",
+                Some("https://a.example, https://b.example ,"),
+            ),
         ],
         || {
             let config = AppConfig::from_env().expect("中间件覆盖项应可加载");
@@ -430,6 +436,35 @@ fn middleware_overrides_are_applied() {
             assert_eq!(config.middleware.rate_limit_requests, 50);
             assert_eq!(config.middleware.rate_limit_period_secs, 2);
             assert!(config.middleware.hsts_enabled);
+            assert_eq!(
+                config.middleware.cors_allowed_origins,
+                vec![
+                    "https://a.example".to_string(),
+                    "https://b.example".to_string()
+                ]
+            );
+        },
+    );
+}
+
+#[test]
+fn invalid_cors_origin_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            (
+                "MIDDLEWARE_CORS_ALLOWED_ORIGINS",
+                Some("https://a.example\nX-Evil: 1"),
+            ),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("非法来源应被拒绝");
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid MIDDLEWARE_CORS_ALLOWED_ORIGINS entry"),
+                "报错信息不符合预期: {error}"
+            );
         },
     );
 }

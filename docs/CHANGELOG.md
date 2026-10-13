@@ -9,6 +9,12 @@
 
 ### 修复
 
+- **CORS 纳入中间件栈并改为可配置**：原先 `create_app` 直接挂 `CorsLayer::permissive()`，
+  既绕过「所有中间件集中在 `middleware/stack.rs`」的约定，又无条件放行任意来源。
+  现新增 `MIDDLEWARE_CORS_ALLOWED_ORIGINS` 白名单（逗号分隔），装配移到 `middleware/stack.rs`
+  作为栈的最内层；默认空名单 → 不下发任何 CORS 头，单值 `*` 仍可显式放行全部来源。
+  同步 `.env`、`.env-example`、`tests/config_tests.rs`、`tests/middleware_tests.rs`、`tests/api_tests.rs`
+  与 `docs/MIDDLEWARE.md`。
 - **SQLite 事务隔离级别失效**：转账事务原本以 `IsolationLevel::Serializable` 开启，
   但 sea-orm 在 SQLite 上会**忽略隔离级别**（只打一条 warn），实际始终是 `BEGIN DEFERRED`，
   既让文档承诺落空，又让每次转账都写一条误导性告警。现改用

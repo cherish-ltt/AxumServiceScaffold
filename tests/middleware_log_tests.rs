@@ -54,6 +54,7 @@ fn base_config() -> MiddlewareConfig {
         rate_limit_requests: 1000,
         rate_limit_period_secs: 1,
         hsts_enabled: false,
+        cors_allowed_origins: Vec::new(),
     }
 }
 

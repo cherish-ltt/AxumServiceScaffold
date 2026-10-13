@@ -31,7 +31,7 @@
 | 13 | `CompressionLayer` | 按 `Accept-Encoding` 压缩响应，>32 字节且非图片/gRPC/SSE 才压缩 | — |
 | 14 | `TimeoutLayer` | 单个请求处理超时（进入本层后至响应产生的耗时，外层排队不计入；排队由 `ConcurrencyLimit` + `Buffer` 承担） | `408` |
 | 15 | `RequestBodyLimitLayer` | 请求体大小上限，按 `Content-Length` 先行拒绝 | `413` |
-| 16 | `CorsLayer` | 跨域 | — |
+| 16 | `CorsLayer` | 按 `MIDDLEWARE_CORS_ALLOWED_ORIGINS` 白名单放行跨域；白名单为空时不发任何 CORS 头 | 无（预检返回 `200` 空响应） |
 
 关键点：
 
@@ -64,8 +64,10 @@
 | `MIDDLEWARE_RATE_LIMIT_REQUESTS` | `32768` | 每个限流周期允许的请求数，超出 `429` |
 | `MIDDLEWARE_RATE_LIMIT_PERIOD_SECS` | `1` | 限流周期长度（秒） |
 | `MIDDLEWARE_HSTS_ENABLED` | 跟随 `APP_ENV` | 生产环境默认下发 `HSTS`，开发环境默认关闭 |
+| `MIDDLEWARE_CORS_ALLOWED_ORIGINS` | 空 | 允许跨域的来源白名单，逗号分隔；留空不下发任何 CORS 头，单值 `*` 放行全部来源 |
 
-任一容量参数为 `0` 都会导致启动失败，避免「以为限制了其实没限制」。
+任一容量参数为 `0` 都会导致启动失败，避免「以为限制了其实没限制」；
+`MIDDLEWARE_CORS_ALLOWED_ORIGINS` 的每个条目必须是合法 header 值，否则启动失败。
 
 上表的默认值与 `.env-example` 示例文件一致，适配「单实例 + SQLite/中小型数据库」的中等配置
 机器；上线前必须按压测结果调整：
@@ -79,6 +81,8 @@
 - `MIDDLEWARE_REQUEST_TIMEOUT_SECS`：取业务正常 p99 的 3~5 倍；过小会误杀慢请求，
   过大则慢请求会长时间占住并发额度。
 - `MIDDLEWARE_MAX_BODY_BYTES`：按最大上传接口的实际需求设置，默认 2 MiB 对 JSON API 足够宽裕。
+- `MIDDLEWARE_CORS_ALLOWED_ORIGINS`：生产环境应显式列出前端域名，不要用 `*`；
+  留空表示服务不供浏览器跨域调用（同源与后端调用不受影响）。
 
 ## 最小压测方法
 

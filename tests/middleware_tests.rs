@@ -19,6 +19,7 @@ fn base_config() -> MiddlewareConfig {
         rate_limit_requests: 1000,
         rate_limit_period_secs: 1,
         hsts_enabled: false,
+        cors_allowed_origins: vec!["https://example.com".to_string()],
     }
 }
 
@@ -245,4 +246,38 @@ async fn compressible_response_is_gzipped_when_accepted() {
             .expect("应压缩响应体"),
         "gzip"
     );
+}
+
+/// CORS 由中间件栈统一装配：白名单内的来源放行，未列入的直接无 CORS 头。
+#[tokio::test]
+async fn cors_layer_follows_allowed_origins_config() {
+    let app = ping_app(&base_config());
+
+    let allowed = send(app.clone(), cors_preflight("https://example.com")).await;
+    assert_eq!(
+        allowed
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .and_then(|value| value.to_str().ok()),
+        Some("https://example.com")
+    );
+
+    let rejected = send(app, cors_preflight("https://evil.example")).await;
+    assert!(
+        rejected
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none(),
+        "未列入白名单的来源不应收到 allow-origin"
+    );
+}
+
+fn cors_preflight(origin: &str) -> Request<Body> {
+    Request::builder()
+        .method("OPTIONS")
+        .uri("/ping")
+        .header(header::ORIGIN, origin)
+        .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
+        .body(Body::empty())
+        .expect("构造请求")
 }

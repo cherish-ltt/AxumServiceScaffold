@@ -1,6 +1,7 @@
 use std::{env, net::SocketAddr, str::FromStr};
 
 use anyhow::{Context, Result, anyhow};
+use axum::http::HeaderValue;
 use tracing_appender::rolling::Rotation;
 
 #[derive(Debug, Clone)]
@@ -81,6 +82,11 @@ pub struct MiddlewareConfig {
     pub rate_limit_period_secs: u64,
     /// 是否下发 HSTS 响应头，默认跟随 `APP_ENV`。
     pub hsts_enabled: bool,
+    /// 允许跨域访问的来源白名单（如 `https://a.example`）。
+    ///
+    /// 空列表表示不下发任何 CORS 放行头；单元素为 `*` 表示放行所有来源。
+    /// 条目在 `AppConfig::from_env` 阶段校验为合法 header 值。
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl AppConfig {
@@ -181,6 +187,10 @@ impl AppConfig {
                 "MIDDLEWARE_HSTS_ENABLED",
                 app_env.eq_ignore_ascii_case("production"),
             )?,
+            cors_allowed_origins: parse_origins(&get_env_or(
+                "MIDDLEWARE_CORS_ALLOWED_ORIGINS",
+                "",
+            ))?,
         };
 
         if middleware.request_timeout_secs == 0
@@ -213,6 +223,23 @@ fn get_required_env(key: &str) -> Result<String> {
 
 fn get_env_or(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+/// 把逗号分隔的来源白名单解析成列表，非法条目直接拒绝启动。
+fn parse_origins(raw: &str) -> Result<Vec<String>> {
+    let mut origins = Vec::new();
+    for origin in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
+        HeaderValue::from_str(origin).map_err(|error| {
+            anyhow!("invalid MIDDLEWARE_CORS_ALLOWED_ORIGINS entry {origin}: {error}")
+        })?;
+        origins.push(origin.to_string());
+    }
+
+    Ok(origins)
 }
 
 fn parse_env_or<T>(key: &str, default: T) -> Result<T>

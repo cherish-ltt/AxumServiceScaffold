@@ -50,6 +50,7 @@ fn test_config(out_dir: &str, utc_offset_hour: i8, utc_offset_minute: i8) -> App
             rate_limit_requests: 1000,
             rate_limit_period_secs: 1,
             hsts_enabled: false,
+            cors_allowed_origins: Vec::new(),
         },
     }
 }

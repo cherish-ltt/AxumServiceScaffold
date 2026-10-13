@@ -21,6 +21,11 @@ const TEST_JWT_SECRET: &str = "api-test-secret-that-is-long-enough";
 
 /// 每个测试独立装配一套容器与临时 SQLite 数据库，互不干扰。
 async fn setup_app() -> Router {
+    setup_app_with_cors_origins(vec!["https://example.com".to_string()]).await
+}
+
+/// 与 `setup_app` 相同，但可指定 CORS 来源白名单。
+async fn setup_app_with_cors_origins(cors_allowed_origins: Vec<String>) -> Router {
     let database_url = format!(
         "sqlite://{}?mode=rwc",
         std::env::temp_dir()
@@ -70,6 +75,7 @@ async fn setup_app() -> Router {
             rate_limit_requests: 1000,
             rate_limit_period_secs: 1,
             hsts_enabled: false,
+            cors_allowed_origins,
         },
     };
 
@@ -835,16 +841,9 @@ async fn unsupported_method_returns_405_with_allow_header() {
 }
 
 #[tokio::test]
-async fn cors_preflight_is_allowed_for_every_origin() {
+async fn cors_preflight_allows_configured_origin_only() {
     let app = setup_app().await;
-    let request = Request::builder()
-        .method("OPTIONS")
-        .uri("/api/v1/examples/echo")
-        .header(header::ORIGIN, "https://example.com")
-        .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
-        .body(Body::empty())
-        .expect("构造请求");
-    let response = send_response(app, request).await;
+    let response = send_response(app, cors_preflight("https://example.com")).await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let headers = response.headers();
@@ -852,7 +851,7 @@ async fn cors_preflight_is_allowed_for_every_origin() {
         headers
             .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
             .and_then(|value| value.to_str().ok()),
-        Some("*")
+        Some("https://example.com")
     );
     assert_eq!(
         headers
@@ -860,6 +859,46 @@ async fn cors_preflight_is_allowed_for_every_origin() {
             .and_then(|value| value.to_str().ok()),
         Some("*")
     );
+}
+
+/// 未列入白名单的来源不得拿到任何跨域放行头。
+#[tokio::test]
+async fn cors_preflight_rejects_unlisted_origin() {
+    let app = setup_app().await;
+    let response = send_response(app, cors_preflight("https://evil.example")).await;
+
+    assert!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none(),
+        "未列入白名单的来源不应收到 allow-origin"
+    );
+}
+
+/// 白名单为空时不下发任何 CORS 头（默认配置）。
+#[tokio::test]
+async fn cors_headers_are_absent_when_whitelist_is_empty() {
+    let app = setup_app_with_cors_origins(Vec::new()).await;
+    let response = send_response(app, cors_preflight("https://example.com")).await;
+
+    assert!(
+        response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none(),
+        "空白名单不应放行任何来源"
+    );
+}
+
+fn cors_preflight(origin: &str) -> Request<Body> {
+    Request::builder()
+        .method("OPTIONS")
+        .uri("/api/v1/examples/echo")
+        .header(header::ORIGIN, origin)
+        .header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+        .body(Body::empty())
+        .expect("构造请求")
 }
 
 #[tokio::test]

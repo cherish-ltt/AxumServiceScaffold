@@ -253,6 +253,9 @@ msrv = "1.99.0"
   的响应格式保持一致；不要在中间件里手写 JSON。
 - 并发限制与限速是两个维度：并发限制约束在途请求数，限速约束单位时间请求数；
   两者均为**进程级**实现，多实例部署需在网关或共享存储层补齐分布式限流。
+- **CORS 也必须在栈里**：`CorsLayer` 由 `middleware/stack.rs` 的 `cors_layer(config)` 装配
+  （栈的最内层），来源白名单读 `MIDDLEWARE_CORS_ALLOWED_ORIGINS`；禁止在 `create_app`
+  或 controller 里直接挂 `CorsLayer::permissive()`，默认必须是不发任何 CORS 头。
 - 调整执行顺序、新增或移除中间件时，必须同步更新 `docs/MIDDLEWARE.md` 的「中间件栈」章节与
   `docs/CHANGELOG.md`，并在 `tests/middleware_tests.rs` 补对应断言（至少覆盖超时、Body 超限、
   背压 503、限流 429、`request_id` 关联）。

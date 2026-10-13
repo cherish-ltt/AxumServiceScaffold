@@ -42,7 +42,7 @@ clone 下来即可跑通。
 
 - **洋葱架构骨架**：四层加装配层，参考实现可直接照抄扩展
 - **统一响应结构**：`{code, message, data?, timestamp}`，见 [统一响应结构](docs/RESPONSE.md)
-- **生产可用的中间件栈**：请求 ID / Trace / 安全响应头 / 背压 / 限流 / 超时 / Body 限制 / 压缩，
+- **生产可用的中间件栈**：请求 ID / Trace / 安全响应头 / CORS 白名单 / 背压 / 限流 / 超时 / Body 限制 / 压缩，
   参数集中在 `.env`，见 [中间件栈与配置](docs/MIDDLEWARE.md)
 - **事务示例**：一次转账完整演示「启动事务 → 读写数据 → 提交 / 回滚」，见 [事务示例](docs/TRANSACTION.md)
 - **JWT 鉴权**：调试登录与当前用户解析，OpenAPI 文档与 Swagger UI 由 `docs` feature 提供（不进 release）
