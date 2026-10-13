@@ -23,7 +23,7 @@
   补 `postgres://` / `mysql://` / 裸路径三类用例，README 与 AGENTS.md 10.5 同步说明。
 - **`LOG_FILTER` 非法不再静默回退**：`logging::init` 原先用
   `unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"))`，过滤规则写错时会静默换一套
-  级别运行（与“非法配置即拒绝启动”的约定相悳）。现改为 `with_context(...)?` 报错退出，
+  级别运行（与“非法配置即拒绝启动”的约定相悖）。现改为 `with_context(...)?` 报错退出，
   并把解析提前到创建文件句柄之前；`tests/logging_tests.rs` 补对应用例，`docs/LOGGING.md` 同步。
 - **分页边界与示例列表一致性**：仓储层 `list_records` 的偏移量改用
   `page.checked_sub(1).and_then(|p| p.checked_mul(size))`，不再依赖「service 已保证 page >= 1」
