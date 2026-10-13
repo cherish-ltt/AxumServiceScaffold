@@ -40,11 +40,14 @@ impl ExampleUseCase for ExampleService {
 
     async fn list_examples(&self, filters: ExampleFilters) -> Result<ExampleList, AppError> {
         const MAX_SIZE: u64 = 100;
+        const MAX_PAGE: u64 = 10_000;
         let page = filters.page.unwrap_or(1);
         let size = filters.size.unwrap_or(10);
 
-        if page == 0 {
-            return Err(AppError::bad_request("page must start from 1"));
+        if page == 0 || page > MAX_PAGE {
+            return Err(AppError::bad_request(format!(
+                "page must be between 1 and {MAX_PAGE}"
+            )));
         }
 
         if size == 0 || size > MAX_SIZE {

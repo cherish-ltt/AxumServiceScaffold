@@ -81,11 +81,11 @@ impl From<ExampleQuery> for ExampleFilters {
 pub struct ExampleListItem {
     #[cfg_attr(feature = "docs", schema(example = "example_001"))]
     pub id: String,
-    #[cfg_attr(feature = "docs", schema(example = "service template"))]
+    #[cfg_attr(feature = "docs", schema(example = "Service template"))]
     pub title: String,
     #[cfg_attr(
         feature = "docs",
-        schema(example = "demo for pagination and query parameters")
+        schema(example = "Demo for pagination and query parameters")
     )]
     pub summary: String,
 }
@@ -128,7 +128,7 @@ impl From<ExampleList> for ExampleListResponse {
 pub struct ExampleDetailResponse {
     #[cfg_attr(feature = "docs", schema(example = "example_001"))]
     pub id: String,
-    #[cfg_attr(feature = "docs", schema(example = "service template"))]
+    #[cfg_attr(feature = "docs", schema(example = "Service template"))]
     pub title: String,
     #[cfg_attr(
         feature = "docs",

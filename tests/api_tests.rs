@@ -376,19 +376,17 @@ async fn list_examples_uses_defaults() {
 }
 
 #[tokio::test]
-async fn list_examples_rejects_zero_page() {
+async fn list_examples_rejects_out_of_range_paging() {
     let app = setup_app().await;
-    let (status, _) = send(app, get("/api/v1/examples?page=0")).await;
 
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-}
+    for query in ["page=0", "page=10001", "size=0", "size=101"] {
+        let (status, _) = send(app.clone(), get(&format!("/api/v1/examples?{query}"))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{query}");
+    }
 
-#[tokio::test]
-async fn list_examples_rejects_zero_size() {
-    let app = setup_app().await;
-    let (status, _) = send(app, get("/api/v1/examples?size=0")).await;
-
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // 边界值仍然可用。
+    let (status, _) = send(app, get("/api/v1/examples?page=10000&size=100")).await;
+    assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
