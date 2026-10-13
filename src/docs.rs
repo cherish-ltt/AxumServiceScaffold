@@ -184,12 +184,10 @@ pub struct DocTransferListResponse {
         crate::api::controllers::system_controller::root,
         crate::api::controllers::system_controller::health,
         crate::api::controllers::system_controller::ready,
-        crate::api::controllers::auth_controller::dev_login,
         crate::api::controllers::auth_controller::me,
         crate::api::controllers::example_controller::create_echo,
         crate::api::controllers::example_controller::list_examples,
         crate::api::controllers::example_controller::get_example,
-        crate::api::controllers::transaction_controller::dev_transfer,
         crate::api::controllers::transaction_controller::get_transfer,
         crate::api::controllers::transaction_controller::list_transfers
     ),
@@ -237,6 +235,27 @@ pub struct DocTransferListResponse {
 )]
 struct ApiDoc;
 
+/// 调试专用接口（dev-login / dev-transfer）的文档。
+///
+/// 这两个 handler 只在 `debug_assertions` 下注册，因此文档也必须按同一开关裁剪：
+/// release + docs 组合下 `utoipa::path` 不会为它们生成 `__path_*`，写进 `ApiDoc` 会直接编译失败。
+#[cfg(debug_assertions)]
+#[derive(OpenApi)]
+#[openapi(paths(
+    crate::api::controllers::auth_controller::dev_login,
+    crate::api::controllers::transaction_controller::dev_transfer
+))]
+struct DevApiDoc;
+
+fn openapi_document() -> utoipa::openapi::OpenApi {
+    let document = ApiDoc::openapi();
+
+    #[cfg(debug_assertions)]
+    let document = document.merge_from(DevApiDoc::openapi());
+
+    document
+}
+
 pub fn mount(router: Router) -> Router {
-    router.merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", ApiDoc::openapi()))
+    router.merge(SwaggerUi::new("/swagger-ui").url("/api-doc/openapi.json", openapi_document()))
 }

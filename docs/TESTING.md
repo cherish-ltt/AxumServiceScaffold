@@ -8,16 +8,22 @@
 
 ```bash
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy --all-targets --features docs -- -D warnings
 cargo check --all-targets
 cargo check --release
-cargo test --all-features
+cargo check --release --features docs
+cargo test --features docs
 ```
+
+（CI 同款命令见 `.github/workflows/rust-ci.yml`；`--all-features` 等价于启用 `preset`
+`http-client` `docs` 三个 feature。）
 
 这样可以同时确认：
 
 - 启用 `docs` feature 时 Swagger 与 OpenAPI 文档正常（开发用 `cargo run --features docs`）；
 - 发布模式下不会暴露开发登录接口；
+- `docs` feature 与 `debug_assertions` 的四种组合都能编译（二者是正交开关，
+  release + docs 下调试接口的文档元数据会被自动裁剪）；
 - 所有 feature 和 release 构建均可通过；
 - 测试和 Clippy 检查通过。
 

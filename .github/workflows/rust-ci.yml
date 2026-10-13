@@ -57,6 +57,9 @@ jobs:
       - name: Run Clippy (lints)
         run: cargo clippy --all-targets --features docs -- -D warnings
 
+      - name: Check release + docs combination
+        run: cargo check --release --features docs
+
       - name: Build the project
         run: cargo build --verbose
 

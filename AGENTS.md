@@ -89,6 +89,9 @@ jobs:
       - name: Run Clippy (lints)
         run: cargo clippy --all-targets --features docs -- -D warnings
 
+      - name: Check release + docs combination
+        run: cargo check --release --features docs
+
       - name: Build the project
         run: cargo build --verbose
 
@@ -299,6 +302,13 @@ msrv = "1.99.0"
   `derive(ToSchema/IntoParams)`、`schema(example=...)` 等注解改投 `feature = "docs"`；
   CI 的 clippy 与 test 步骤使用 `--features docs`（见第 2 节），确保文档代码也在检查范围内。
 - `system` 响应的 `docs_enabled` 字段跟随 `cfg!(feature = "docs")`。
+- **`docs` feature 与 `debug_assertions` 正交，四种组合都必须可编译**：
+  `utoipa::path` 仅为实际编译的 handler 生成 `__path_*`，因此仅调试存在的
+  handler（`dev_login` / `dev_transfer`）的文档必须放在 `src/docs.rs` 里
+  单独 `#[cfg(debug_assertions)]` 的 `DevApiDoc`，再通过
+  `OpenApi::merge_from` 合入主文档；禁止直接写进主 `ApiDoc` 的 `paths(...)`
+  （release + docs 下会因找不到 `__path_*` 编译失败）。CI 的
+  `cargo check --release --features docs` 步骤（见第 2 节）负责守住这条约束。
 
 **本文件是项目的“开发宪法”，所有 pull request 和代码审查均应参照其内容。**
 

@@ -22,10 +22,11 @@ use axum::{Json, routing::post};
 use crate::api::dto::transaction::{TransferReceiptResponse, TransferRequest};
 
 #[cfg(feature = "docs")]
-use crate::docs::{
-    DocErrorResponse, DocTransferDetailResponse, DocTransferListResponse,
-    DocTransferReceiptResponse,
-};
+use crate::docs::{DocErrorResponse, DocTransferDetailResponse, DocTransferListResponse};
+
+// 仅 dev_transfer 的文档引用该响应结构，随 handler 一起按构建类型裁剪。
+#[cfg(all(feature = "docs", debug_assertions))]
+use crate::docs::DocTransferReceiptResponse;
 
 pub fn router() -> Router<Arc<Container>> {
     let router = Router::new()

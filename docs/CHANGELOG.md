@@ -9,6 +9,12 @@
 
 ### 修复
 
+- **`--release --features docs` 构建断裂**：`docs` feature 与 `debug_assertions` 是两个
+  正交开关，`utoipa::path` 只为 debug 专用 handler 生成路由元数据，而
+  `src/docs.rs` 的 `OpenApi` 无条件引用 `dev_login` / `dev_transfer`，导致
+  release + docs 组合下 `__path_dev_login` / `__path_dev_transfer` 找不到而编译失败。
+  现拆出仅在 `debug_assertions` 下编译的 `DevApiDoc`，由 `merge_from` 合入主文档，
+  两个开关的四种组合都可编译；同时裁剪 release 下仅有 debug 用例使用的测试辅助函数。
 - **分页偏移溢出**（审查 BUG-1）：`list_transfers` 新增页码上限校验
   （`page` 必须位于 1~10000，`MAX_PAGE`），查询层用 `checked_mul` 兜底防止
   `(page - 1) * size` 在 `u64` 上溢出；`docs/TRANSACTION.md` 接口表同步标注分页范围。

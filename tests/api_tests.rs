@@ -123,6 +123,8 @@ fn post_json(uri: &str, body: Value) -> Request<Body> {
         .expect("构造 POST 请求")
 }
 
+// 仅被 debug 构建注册的 dev-transfer 用例使用，release 下需要一并裁剪。
+#[cfg(debug_assertions)]
 fn post_json_with_bearer(uri: &str, token: &str, body: Value) -> Request<Body> {
     Request::builder()
         .method("POST")
@@ -406,7 +408,7 @@ async fn example_detail_returns_requester_info() {
 
 #[cfg(feature = "docs")]
 #[tokio::test]
-async fn swagger_ui_is_mounted_in_debug() {
+async fn swagger_ui_is_mounted_when_docs_feature_is_on() {
     let app = setup_app().await;
     let status = send_response(app, get("/swagger-ui")).await.status();
 
@@ -432,13 +434,17 @@ async fn openapi_document_is_served() {
             .unwrap_or(false)
     );
 
-    // 事务示例的三个接口都应当出现在 OpenAPI 文档里。
+    // 事务示例的接口应当出现在 OpenAPI 文档里；dev-transfer 只在调试构建注册，随构建类型裁剪。
     let paths = body["paths"].as_object().expect("paths 对象");
-    for path in [
+    #[cfg(debug_assertions)]
+    let expected = [
         "/api/v1/transactions",
         "/api/v1/transactions/{id}",
         "/api/v1/transactions/dev-transfer",
-    ] {
+    ];
+    #[cfg(not(debug_assertions))]
+    let expected = ["/api/v1/transactions", "/api/v1/transactions/{id}"];
+    for path in expected {
         assert!(paths.contains_key(path), "OpenAPI 缺少路径: {path}");
     }
     let tags = body["tags"].as_array().expect("tags 数组");
