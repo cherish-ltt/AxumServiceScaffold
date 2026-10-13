@@ -104,7 +104,7 @@ impl AppConfig {
             min_connections: parse_env_or("DATABASE_MIN_CONNECTIONS", 1u32)?,
             max_connections: parse_env_or("DATABASE_MAX_CONNECTIONS", 10u32)?,
             connect_timeout_secs: parse_env_or("DATABASE_CONNECT_TIMEOUT_SECS", 8u64)?,
-            idle_secs: parse_env_or("DATABASE_IDLE_SECS", 30u64)?,
+            idle_secs: parse_env_or("DATABASE_IDLE_SECS", 60u64)?,
             sqlx_logging: parse_env_or("DATABASE_SQLX_LOGGING", false)?,
         };
 
@@ -171,7 +171,7 @@ impl AppConfig {
                 value => return Err(anyhow!("unsupported log rotation strategy: {value}")),
             },
             max_log_files,
-            out_dir: get_env_or("LOG_OUT_DIR", "/var/log/axum-app"),
+            out_dir: get_env_or("LOG_OUT_DIR", "./log"),
             batch_max_events,
             batch_flush_interval_secs,
         };
