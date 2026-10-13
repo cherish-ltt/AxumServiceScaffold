@@ -17,6 +17,11 @@
   改为 `./log`（不写环境变量时不再向系统目录写入，普通用户与容器内可直启动），
   `DATABASE_IDLE_SECS` 由 `30` 改为 `60`；`tests/config_tests.rs` 断言与 `docs/LOGGING.md`
   参数表同步。
+- **409 响应泄露数据库内部结构**：`From<DbErr>` 原本把 `UniqueConstraintViolation` 的
+  原始 detail 直接当作文案返回，客户端会收到
+  `UNIQUE constraint failed: transfer_records.request_id`（表名 + 列名）。
+  现改为固定文案 `resource already exists` + 服务端 `debug` 日志，`AGENTS.md`
+  第 10.5 节同步约束。
 - **Clippy 阈值失效修正**：`.clippy.toml` 里的 `cognitive-complexity-threshold`、
   `too-many-lines-threshold`、`allow-unwrap-in-tests` 此前从未生效（对应 lint 默认
   `allow`，只写阈值不启用 lint 等于假配置）。现改为：在 `src/lib.rs` 显式启用

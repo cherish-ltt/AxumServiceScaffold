@@ -560,11 +560,14 @@ async fn duplicate_request_id_returns_conflict_without_extra_writes() {
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
+    let message = body["message"].as_str().unwrap_or_default();
     assert!(
-        body["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("Conflict")),
+        message.contains("Conflict"),
         "409 应透出可读原因，实际: {body}"
+    );
+    assert!(
+        !message.contains("UNIQUE") && !message.contains("transfer_records"),
+        "409 不得透出表名/列名等数据库内部结构，实际: {message}"
     );
 
     // 第二次的余额更新与流水写入都被回滚，库里只剩首次结果。

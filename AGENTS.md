@@ -388,6 +388,9 @@ msrv = "1.99.0"
   （`CREATE TABLE`，由 `databases::run_migrations` 以 `sqlx::migrate!` 执行）；
   种子数据必须幂等（`NOT EXISTS` 或等价写法）。
 - 每个事务用例至少覆盖「提交成功」与「中途失败回滚后数据无残留」两类测试，回滚测试需断言失败前状态未被改变。
-- 唯一约束冲突属于客户端可控冲突，在 `From<DbErr>` 中统一映射为 `AppError::Conflict`（409）并透出可读原因，不得当作 500 处理；幂等键一类业务唯一列必须建唯一索引，不能只靠先查后写。
+- 唯一约束冲突属于客户端可控冲突，在 `From<DbErr>` 中统一映射为 `AppError::Conflict`（409），
+  响应文案用稳定描述（如 `resource already exists`），**不得**把数据库原始 detail（含表名、列名）
+  透给客户端，只写 `debug` 日志；也不得当作 500 处理。幂等键一类业务唯一列必须建唯一索引，
+  不能只靠先查后写。
 - 数据库文件不得入库（`.gitignore` 排除）：建表、索引与种子数据必须由启动流程自动完成且幂等，表结构变更需同时提供老库的自动补齐路径。
 - 参考实现：`src/services/transaction.rs`、`src/infrastructure/repositories/transaction.rs`。

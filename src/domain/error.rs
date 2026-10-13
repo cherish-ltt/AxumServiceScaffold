@@ -66,8 +66,10 @@ impl From<anyhow::Error> for AppError {
 impl From<sea_orm::DbErr> for AppError {
     fn from(error: sea_orm::DbErr) -> Self {
         // 唯一约束冲突属于客户端可控冲突（如幂等键重复提交），映射为 409 而非 500。
+        // 数据库原始 detail 含表名/列名，只进日志，不进响应体。
         if let Some(sea_orm::SqlErr::UniqueConstraintViolation(detail)) = error.sql_err() {
-            return Self::Conflict(detail);
+            tracing::debug!(detail = %detail, "unique constraint violation mapped to 409 conflict");
+            return Self::Conflict("resource already exists".to_string());
         }
 
         Self::Database(error.to_string())
@@ -198,9 +200,11 @@ mod tests {
             "唯一约束冲突应映射为 Conflict，实际: {error:?}"
         );
         assert_eq!(error.http_code(), 409);
+        // 数据库 detail 含表名/列名，只能进日志，不得出现在客户端可见的文案里。
+        assert_eq!(error.to_string(), "Conflict: resource already exists");
         assert!(
-            error.to_string().contains("UNIQUE constraint failed"),
-            "冲突信息应保留数据库原因，便于排查: {error}"
+            !error.to_string().contains("UNIQUE constraint failed"),
+            "冲突信息不得透出数据库内部结构: {error}"
         );
     }
 }
