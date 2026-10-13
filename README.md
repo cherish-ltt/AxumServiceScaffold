@@ -11,7 +11,8 @@ clone 下来即可跑通。
 
 - Web 框架 `axum`、ORM `sea-orm`、鉴权 `jsonwebtoken`（`aws_lc_rs` 后端）
 - OpenAPI 文档 `utoipa + swagger-ui`、密码哈希 `argon2`
-- 预置 `rayon` 与一组常用库备用
+- 预置依赖（`rayon` / `reqwest` / `validator` / `regex` 等）以可选 feature `preset`、`http-client` 提供，
+  默认构建不编译（`cargo build --features preset,http-client` 开启）
 
 ## 架构动效预览
 

@@ -17,6 +17,10 @@
   改为 `./log`（不写环境变量时不再向系统目录写入，普通用户与容器内可直启动），
   `DATABASE_IDLE_SECS` 由 `30` 改为 `60`；`tests/config_tests.rs` 断言与 `docs/LOGGING.md`
   参数表同步。
+- **默认 feature 收紧与依赖清理**：`default` 由 `["preset", "http-client"]` 改为空，
+  预置库改为按需开启（`--features preset,http-client`）；移除未被引用的
+  `axum/multipart` feature、`mime` 依赖以及 `uuid` 的 `v4`/`serde` feature。
+  README、`docs/DEVELOPMENT.md`、`docs/TESTING.md` 同步说明。
 - **CORS 纳入中间件栈并改为可配置**：原先 `create_app` 直接挂 `CorsLayer::permissive()`，
   既绕过「所有中间件集中在 `middleware/stack.rs`」的约定，又无条件放行任意来源。
   现新增 `MIDDLEWARE_CORS_ALLOWED_ORIGINS` 白名单（逗号分隔），装配移到 `middleware/stack.rs`

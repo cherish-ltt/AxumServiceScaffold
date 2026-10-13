@@ -40,10 +40,19 @@ let ok = verify_password("S3cure-Password!", &hashed)?;
 
 为了让新项目开箱更快，`Cargo.toml` 里额外预置了几类常用依赖，并且加了中文分类注释：
 
-- `argon2`：密码哈希
+- `argon2`：密码哈希（正式依赖，开箱即用）
 - `rayon`：CPU 密集型并行计算备用
 - `reqwest`：对外 HTTP 调用
 - `validator`：请求参数校验
-- `regex`、`base64`、`once_cell`、`rand`：常用工具库
+- `regex`、`base64`、`once_cell`、`rand`、`derive_more`、`itertools`：常用工具库
 
-这些库暂时不一定全部在业务里直接使用，但作为脚手架是合理的储备。
+这些库暂时不一定全部在业务里直接使用，因此**不在 `default` feature 里**，
+需要时手动开启：
+
+```bash
+cargo build --features preset        # rayon / validator / regex / base64 / once_cell / rand / derive_more / itertools
+cargo build --features http-client   # reqwest
+cargo build --features preset,http-client
+```
+
+`Cargo.toml` 中的版本仍然逐个锁定，开启后即可直接 `use`，无需再改依赖声明。

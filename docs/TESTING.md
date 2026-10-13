@@ -15,8 +15,9 @@ cargo check --release --features docs
 cargo test --features docs
 ```
 
-（CI 同款命令见 `.github/workflows/rust-ci.yml`；`--all-features` 等价于启用 `preset`
-`http-client` `docs` 三个 feature。）
+（CI 同款命令见 `.github/workflows/rust-ci.yml`；`default` feature 为空，
+`--all-features` 等价于启用 `preset`、`http-client`、`docs` 三个可选 feature，
+因此 `--all-features` 会比 CI 多编译一批预置库。）
 
 这样可以同时确认：
 
