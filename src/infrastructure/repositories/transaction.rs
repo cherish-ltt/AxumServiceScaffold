@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::Local;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set,
+    QueryOrder, QuerySelect, Set, sea_query::Expr,
 };
 
 use crate::{
@@ -29,10 +29,14 @@ pub trait TransferRepository: Send + Sync {
     where
         C: ConnectionTrait;
 
+    /// 以乐观锁更新账户余额：只有当库中 `version` 仍等于 `expected_version` 时才写入，
+    /// 并将 `version` 自增到 `account.version`。影响行数为 0 表示期间被其他事务改过，
+    /// 返回 409 而不是静默覆盖。
     async fn update_account_balance<C>(
         &self,
         db: &C,
         account: &TransferAccountState,
+        expected_version: i64,
     ) -> Result<(), AppError>
     where
         C: ConnectionTrait;
@@ -100,18 +104,35 @@ impl TransferRepository for SeaOrmTransferRepository {
         &self,
         db: &C,
         account: &TransferAccountState,
+        expected_version: i64,
     ) -> Result<(), AppError>
     where
         C: ConnectionTrait,
     {
-        let active = transfer_account::ActiveModel {
-            id: Set(account.id.clone()),
-            balance_cents: Set(account.balance_cents),
-            version: Set(account.version),
-            updated_at: Set(Local::now().timestamp_millis()),
-            ..Default::default()
-        };
-        active.update(db).await?;
+        let updated = transfer_account::Entity::update_many()
+            .col_expr(
+                transfer_account::Column::BalanceCents,
+                Expr::value(account.balance_cents),
+            )
+            .col_expr(
+                transfer_account::Column::Version,
+                Expr::value(account.version),
+            )
+            .col_expr(
+                transfer_account::Column::UpdatedAt,
+                Expr::value(Local::now().timestamp_millis()),
+            )
+            .filter(transfer_account::Column::Id.eq(account.id.clone()))
+            .filter(transfer_account::Column::Version.eq(expected_version))
+            .exec(db)
+            .await?;
+
+        if updated.rows_affected == 0 {
+            return Err(AppError::conflict(format!(
+                "account {} was modified concurrently or no longer exists",
+                account.id
+            )));
+        }
 
         Ok(())
     }
@@ -253,5 +274,104 @@ impl From<transfer_audit::Model> for TransferAuditView {
             detail: model.detail,
             created_at: model.created_at,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{Database, DatabaseConnection};
+    use uuid::Uuid;
+
+    use super::{SeaOrmTransferRepository, TransferRepository};
+    use crate::{
+        domain::{error::AppError, models::transaction::TransferAccountState},
+        infrastructure::databases::run_migrations,
+    };
+
+    const ALICE: &str = "acc_alice";
+
+    async fn setup() -> DatabaseConnection {
+        let url = format!(
+            "sqlite://{}?mode=rwc",
+            std::env::temp_dir()
+                .join(format!(
+                    "axum-scaffold-repository-test-{}.db",
+                    Uuid::now_v7()
+                ))
+                .display()
+        );
+        let database = Database::connect(url.clone())
+            .await
+            .expect("连接临时数据库");
+        run_migrations(&database, &url)
+            .await
+            .expect("执行迁移与播种成功");
+
+        database
+    }
+
+    /// 读改写期间版本被他人推进后，旧版本写入必须被拒绝而不是静默覆盖。
+    #[tokio::test]
+    async fn update_with_stale_version_is_rejected_as_conflict() {
+        let database = setup().await;
+        let repository = SeaOrmTransferRepository;
+
+        let account = repository
+            .find_account(&database, ALICE)
+            .await
+            .expect("查询账户")
+            .expect("账户存在");
+        assert_eq!(account.version, 0);
+
+        let first = TransferAccountState {
+            balance_cents: account.balance_cents - 1000,
+            version: account.version + 1,
+            ..account.clone()
+        };
+        repository
+            .update_account_balance(&database, &first, account.version)
+            .await
+            .expect("首次更新应成功");
+
+        let stale = TransferAccountState {
+            balance_cents: account.balance_cents - 2000,
+            version: account.version + 1,
+            ..account.clone()
+        };
+        let error = repository
+            .update_account_balance(&database, &stale, account.version)
+            .await
+            .expect_err("过期版本必须冲突");
+        assert!(
+            matches!(error, AppError::Conflict(_)),
+            "过期版本应映射为 409 冲突，实际: {error:?}"
+        );
+
+        let reloaded = repository
+            .find_account(&database, ALICE)
+            .await
+            .expect("重新查询")
+            .expect("账户存在");
+        assert_eq!(reloaded.balance_cents, first.balance_cents);
+        assert_eq!(reloaded.version, 1);
+    }
+
+    /// 乐观锁条件不满足（账户不存在或版本已被推进）时返回 409，不得留下中间状态。
+    #[tokio::test]
+    async fn update_with_unknown_account_is_rejected_as_conflict() {
+        let database = setup().await;
+        let repository = SeaOrmTransferRepository;
+
+        let missing = TransferAccountState {
+            id: "acc_missing".to_string(),
+            owner: "nobody".to_string(),
+            balance_cents: 1,
+            version: 1,
+        };
+        let error = repository
+            .update_account_balance(&database, &missing, 0)
+            .await
+            .expect_err("账户不存在时也应冲突");
+        assert!(matches!(error, AppError::Conflict(_)));
     }
 }

@@ -15,6 +15,11 @@
   `begin_with_options(sqlite_transaction_mode = IMMEDIATE)`，在 `BEGIN` 时就取得写锁，
   消除 DEFERRED 下「读后升级写锁」的冲突窗口；`docs/TRANSACTION.md` 与 `AGENTS.md`
   第 10.5 节同步说明「控制并发用事务模式而非隔离级别」。
+- **账户余额缺少乐观锁**：`update_account_balance` 原本用全字段 `ActiveModel::update()`，
+  `WHERE` 中不带 `version`，读改写期间余额被他人推进会**静默覆盖**（与 AGENTS.md 10.5 不符）。
+  现改为 `update_many` + `balance/version/updated_at` 表达式 + `WHERE id AND version = <读取时的值>`，
+  影响行数为 0 时返回 `409 Conflict`；仓储接口新增 `expected_version` 参数，
+  并在 `infrastructure/repositories/transaction.rs` 补单元测试。
 - **`--release --features docs` 构建断裂**：`docs` feature 与 `debug_assertions` 是两个
   正交开关，`utoipa::path` 只为 debug 专用 handler 生成路由元数据，而
   `src/docs.rs` 的 `OpenApi` 无条件引用 `dev_login` / `dev_transfer`，导致

@@ -65,7 +65,9 @@ curl -s "http://127.0.0.1:8080/api/v1/transactions/<record_id>" -H "Authorizatio
 - **事务边界只出现在 `services` 层**：`TransferService::transfer` 是唯一调用 `begin` / `commit` / `rollback` 的地方，仓储与 controller 都不开事务。
 - **仓储方法接收 `C: ConnectionTrait`**：传入 `&DatabaseConnection` 表示不进事务，传入 `&DatabaseTransaction` 表示在调用方事务内执行，同一套方法两处复用。
 - **写入全部完成后才提交**：任何一步返回 `Err` 都会回滚，包括余额不足这类业务错误。
-- **金额用整数分**：`amount_cents: i64`，不使用浮点；账户表用自增 `version` 暴露并发丢失更新。
+- **金额用整数分**：`amount_cents: i64`，不使用浮点。
+- **乐观锁**：账户表用自增 `version` 做条件更新（`WHERE id = ? AND version = <读取时的值>`），
+  影响行数为 0 时返回 `409 Conflict`，不做静默覆盖。
 - **并发安全**：写事务以 `SqliteTransactionMode::Immediate` 开启（即 `BEGIN IMMEDIATE`），
   写锁在事务开始时就取得，避免 DEFERRED 下「先读余额再扣减」的锁升级冲突窗口。
   注意 `IsolationLevel` 在 SQLite 上**不生效**（sea-orm 只打一条 warn 后忽略），

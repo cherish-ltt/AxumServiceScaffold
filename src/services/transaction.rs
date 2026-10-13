@@ -144,10 +144,10 @@ async fn transfer_in_transaction<R: TransferRepository>(
     let from_after = debit(&from, command.amount_cents)?;
     let to_after = credit(&to, command.amount_cents)?;
     repository
-        .update_account_balance(transaction, &from_after)
+        .update_account_balance(transaction, &from_after, from.version)
         .await?;
     repository
-        .update_account_balance(transaction, &to_after)
+        .update_account_balance(transaction, &to_after, to.version)
         .await?;
 
     let identity = RecordIdentity {

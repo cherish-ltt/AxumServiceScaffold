@@ -359,7 +359,9 @@ msrv = "1.99.0"
 - 读改写场景必须开启写事务：SQLite 不支持在事务内切换隔离级别（`IsolationLevel` 会被
   sea-orm 忽略并打 warn），必须用 `begin_with_options(TransactionOptions { sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate), .. })`；
   金额、数量用整数最小单位表示（如 `amount_cents: i64`），禁止浮点。
-- 需要并发控制的表维护自增 `version` 列，更新时一并自增，不做静默覆盖。
+- 需要并发控制的表维护自增 `version` 列，更新时以 `WHERE id = ? AND version = <读取时的值>`
+  做条件更新并自增 `version`；影响行数为 0 表示期间被其他事务改过，必须返回 `AppError::Conflict`（409），
+  不得把 `update_many` 的「0 行」当成成功而静默覆盖。
 - 新增实体放在 `src/entities` 下独立文件，并在 `migrations/` 目录新增对应的 sqlx 迁移文件
   （`CREATE TABLE`，由 `databases::run_migrations` 以 `sqlx::migrate!` 执行）；
   种子数据必须幂等（`NOT EXISTS` 或等价写法）。
