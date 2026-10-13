@@ -142,9 +142,9 @@ prek init   # 安装钩子，之后每次 git commit 自动运行格式、lint�
 ```bash
 prek run --all-files
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features docs -- -D warnings
 cargo build
-cargo test
+cargo test --features docs
 ```
 
 单元测试覆盖率使用 `cargo llvm-cov` 检测，要求不低于 80%。

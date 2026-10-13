@@ -169,14 +169,33 @@ match_block_trailing_comma = true
 
 ```toml
 # ── Clippy Configuration ──
+# 本文件只配置「lint 的阈值 / 开关」；阈值只有在对应 lint 被启用时才会生效，
+# 已启用的 lint 列在 Cargo.toml 的 [lints.clippy]（作用于本包全部 target）。
+
+# clippy::cognitive_complexity 的阈值（已启用）
 cognitive-complexity-threshold = 15
+# clippy::too_many_arguments 的阈值（complexity 组，clippy 默认即启用）
 too-many-arguments-threshold = 5
-too-many-lines-threshold = 30
+# clippy::unwrap_used 在测试代码中放行（已启用）
 allow-unwrap-in-tests = true
+
 msrv = "1.99.0"
 ```
 
-所有代码必须通过 `cargo clippy --all-targets -- -D warnings` 检查，无警告。
+启用位置（**必须**与 `.clippy.toml` 的注释保持一致）：
+
+- `src/lib.rs` 顶部的 `#![warn(clippy::cognitive_complexity, clippy::unwrap_used)]` —— 覆盖全部生产代码
+  与 `src/` 内的单元测试；`tests/` 集成测试不适用（用例的 setup / 断言天然长而分支多）。
+- **只写阈值不启用 lint 等于阈值不生效**：`cognitive_complexity` 属于 nursery、`too_many_lines` 属于
+  pedantic、`unwrap_used` 属于 restriction，三者默认都是 `allow`。新增阈值时必须同时在
+  `src/lib.rs` 启用对应 lint，否则就是一份“看起来很严”的假配置。
+- 故意**不启用**的两个 lint：`too_many_lines`（pedantic，30 行阈值会把配置快照、中间件装配
+  这类线性代码全部判为超标，拆分反而降低可读性）与 `expect_used`（restriction，在集成测试的
+  辅助函数里噪声过大）。改代码而不是调阈值。
+
+所有代码必须通过 `cargo clippy --all-targets --features docs -- -D warnings` 检查，无警告
+（与 CI 一致；`docs` feature 必须打开，否则文档代码不在检查范围内）。`--all-features` 会额外
+编译 `preset` / `http-client` 两个可选依赖 bundle，pre-commit 钩子用它做本地兜底。
 
 ---
 

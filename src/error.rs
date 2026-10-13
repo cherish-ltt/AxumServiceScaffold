@@ -11,22 +11,27 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let status =
             StatusCode::from_u16(self.http_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        let message = match status {
-            StatusCode::BAD_REQUEST
-            | StatusCode::UNAUTHORIZED
-            | StatusCode::NOT_FOUND
-            | StatusCode::CONFLICT => self.to_string(),
-            StatusCode::SERVICE_UNAVAILABLE => {
-                error!(error = %self, "service unavailable");
-                "Service temporarily unavailable".to_string()
-            },
-            _ => {
-                error!(error = %self, "request handling failed");
-                "Internal server error".to_string()
-            },
-        };
+        let message = response_message(&self, status);
+
+        // 服务端错误只在日志里留原始原因，响应体用稳定文案（已含在 AppError 的 Display 里）。
+        if status.is_server_error() {
+            error!(status = status.as_u16(), error = %self, "request handling failed");
+        }
+
         ApiResponse::<()>::error(status, message).into_response()
     }
+}
+
+/// 客户端可见的文案：4xx 透出业务原因，503 与 5xx 只给稳定文案。
+fn response_message(error: &AppError, status: StatusCode) -> String {
+    if status.is_client_error() {
+        return error.to_string();
+    }
+    if status == StatusCode::SERVICE_UNAVAILABLE {
+        return "Service temporarily unavailable".to_string();
+    }
+
+    "Internal server error".to_string()
 }
 
 #[cfg(test)]

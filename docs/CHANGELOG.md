@@ -17,6 +17,13 @@
   改为 `./log`（不写环境变量时不再向系统目录写入，普通用户与容器内可直启动），
   `DATABASE_IDLE_SECS` 由 `30` 改为 `60`；`tests/config_tests.rs` 断言与 `docs/LOGGING.md`
   参数表同步。
+- **Clippy 阈值失效修正**：`.clippy.toml` 里的 `cognitive-complexity-threshold`、
+  `too-many-lines-threshold`、`allow-unwrap-in-tests` 此前从未生效（对应 lint 默认
+  `allow`，只写阈值不启用 lint 等于假配置）。现改为：在 `src/lib.rs` 显式启用
+  `clippy::cognitive_complexity` 与 `clippy::unwrap_used`，并拆分 `error.rs` 里的
+  `into_response` 使其低于复杂度阈值；移除不具备可行性的 `too-many-lines-threshold`。
+  `.clippy.toml` 与 `AGENTS.md` 第 5 节（以及 README / `docs/TESTING.md` 的检查命令）
+  统一说明实际生效范围与不启用的两个 lint。
 - **默认 feature 收紧与依赖清理**：`default` 由 `["preset", "http-client"]` 改为空，
   预置库改为按需开启（`--features preset,http-client`）；移除未被引用的
   `axum/multipart` feature、`mime` 依赖以及 `uuid` 的 `v4`/`serde` feature。
