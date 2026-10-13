@@ -1,5 +1,6 @@
 use std::{
     io::{self, Write},
+    mem,
     sync::{Arc, Mutex, mpsc},
     thread::{self, JoinHandle},
     time::Duration,
@@ -271,16 +272,35 @@ impl BatchFileWriter {
     }
 
     /// 把缓冲内容一次性写入文件并清空。
+    ///
+    /// 磁盘 IO 在锁外进行：先在锁内取走缓冲并重置计数，再释放锁写文件。
+    /// 否则定时刷盘或满批落盘时，所有写日志的线程会被写盘时间串行阻塞。
     fn flush(&self) -> io::Result<()> {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.buf.is_empty() {
-            return Ok(());
+        let (mut pending, pending_events) = {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.buf.is_empty() {
+                return Ok(());
+            }
+            (
+                mem::take(&mut state.buf),
+                mem::replace(&mut state.events, 0),
+            )
+        };
+
+        let write_result = {
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.write_all(&pending).and_then(|()| inner.flush())
+        };
+
+        if let Err(error) = write_result {
+            // 写盘失败时把内容放回缓冲队首，避免丢日志。
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            pending.extend_from_slice(&state.buf);
+            state.buf = pending;
+            state.events += pending_events;
+            return Err(error);
         }
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.write_all(&state.buf)?;
-        inner.flush()?;
-        state.buf.clear();
-        state.events = 0;
+
         Ok(())
     }
 

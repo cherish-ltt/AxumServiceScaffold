@@ -9,6 +9,10 @@
 
 ### 修复
 
+- **日志落盘的磁盘 IO 移出锁外**：`BatchFileWriter::flush` 原先在持有缓冲锁的情况下
+  `write_all` + `flush`，定时刷盘或满批落盘时所有写日志的线程会一起阻塞在磁盘 IO 上。
+  现改为先在锁内 `mem::take` 换出缓冲并重置计数，再释放锁写文件；写盘失败时把内容
+  放回缓冲队首，不丢日志。
 - **配置兜底值与 `.env-example` 对齐**：`LOG_OUT_DIR` 代码默认值由 `/var/log/axum-app`
   改为 `./log`（不写环境变量时不再向系统目录写入，普通用户与容器内可直启动），
   `DATABASE_IDLE_SECS` 由 `30` 改为 `60`；`tests/config_tests.rs` 断言与 `docs/LOGGING.md`
