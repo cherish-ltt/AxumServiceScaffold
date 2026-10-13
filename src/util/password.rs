@@ -4,22 +4,22 @@ use crate::error::AppError;
 
 pub fn hash_password(password: &str) -> Result<String, AppError> {
     if password.trim().is_empty() {
-        return Err(AppError::bad_request("密码不能为空"));
+        return Err(AppError::bad_request("password must not be empty"));
     }
 
     Argon2::default()
         .hash_password(password.as_bytes())
         .map(|hashed| hashed.to_string())
-        .map_err(|error| AppError::internal(format!("Argon2 哈希失败: {error}")))
+        .map_err(|error| AppError::internal(format!("Argon2 hashing failed: {error}")))
 }
 
 pub fn verify_password(password: &str, password_hash: &str) -> Result<bool, AppError> {
     if password.trim().is_empty() {
-        return Err(AppError::bad_request("密码不能为空"));
+        return Err(AppError::bad_request("password must not be empty"));
     }
 
     let parsed_hash = PasswordHash::new(password_hash)
-        .map_err(|error| AppError::bad_request(format!("密码哈希格式无效: {error}")))?;
+        .map_err(|error| AppError::bad_request(format!("invalid password hash format: {error}")))?;
 
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
@@ -58,7 +58,7 @@ mod tests {
         let error = verify_password("S3cure-Password!", "not-a-argon2-hash")
             .expect_err("无效哈希格式应被拒绝");
         assert!(
-            matches!(error, AppError::BadRequest(message) if message.contains("密码哈希格式无效"))
+            matches!(error, AppError::BadRequest(message) if message.contains("invalid password hash format"))
         );
     }
 }

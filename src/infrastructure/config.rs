@@ -1,6 +1,7 @@
 use std::{env, net::SocketAddr, str::FromStr};
 
 use anyhow::{Context, Result, anyhow};
+use axum::http::HeaderValue;
 use tracing_appender::rolling::Rotation;
 
 #[derive(Debug, Clone)]
@@ -25,7 +26,7 @@ impl ServerConfig {
         let address = format!("{}:{}", self.host, self.port);
         address
             .parse::<SocketAddr>()
-            .with_context(|| format!("无法解析服务监听地址: {address}"))
+            .with_context(|| format!("failed to parse server listen address: {address}"))
     }
 }
 
@@ -81,6 +82,11 @@ pub struct MiddlewareConfig {
     pub rate_limit_period_secs: u64,
     /// 是否下发 HSTS 响应头，默认跟随 `APP_ENV`。
     pub hsts_enabled: bool,
+    /// 允许跨域访问的来源白名单（如 `https://a.example`）。
+    ///
+    /// 空列表表示不下发任何 CORS 放行头；单元素为 `*` 表示放行所有来源。
+    /// 条目在 `AppConfig::from_env` 阶段校验为合法 header 值。
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl AppConfig {
@@ -98,7 +104,7 @@ impl AppConfig {
             min_connections: parse_env_or("DATABASE_MIN_CONNECTIONS", 1u32)?,
             max_connections: parse_env_or("DATABASE_MAX_CONNECTIONS", 10u32)?,
             connect_timeout_secs: parse_env_or("DATABASE_CONNECT_TIMEOUT_SECS", 8u64)?,
-            idle_secs: parse_env_or("DATABASE_IDLE_SECS", 30u64)?,
+            idle_secs: parse_env_or("DATABASE_IDLE_SECS", 60u64)?,
             sqlx_logging: parse_env_or("DATABASE_SQLX_LOGGING", false)?,
         };
 
@@ -110,37 +116,51 @@ impl AppConfig {
         };
 
         if jwt.secret.len() < 32 {
-            return Err(anyhow!("JWT_SECRET 长度至少需要 32 个字符"));
+            return Err(anyhow!("JWT_SECRET must be at least 32 characters long"));
         }
         if app_env.eq_ignore_ascii_case("production")
             && jwt.secret == "change-me-to-a-random-string-with-at-least-32-characters"
         {
-            return Err(anyhow!("生产环境不能使用示例 JWT_SECRET"));
+            return Err(anyhow!(
+                "example JWT_SECRET is not allowed in production environment"
+            ));
         }
         if jwt.access_token_ttl_minutes <= 0 {
-            return Err(anyhow!("JWT_ACCESS_TOKEN_TTL_MINUTES 必须大于 0"));
+            return Err(anyhow!(
+                "JWT_ACCESS_TOKEN_TTL_MINUTES must be greater than 0"
+            ));
         }
         if database.max_connections == 0
             || database.min_connections == 0
             || database.min_connections > database.max_connections
         {
             return Err(anyhow!(
-                "数据库连接池参数无效：需要 0 < min_connections <= max_connections"
+                "invalid database pool parameters: expected 0 < min_connections <= max_connections"
+            ));
+        }
+        // 迁移文件与补列逻辑都依赖 SQLite 语法（pragma_table_info / sqlite 后端），
+        // 其他后端会在启动时以难以定位的方式失败，所以在这里直接拒绝。
+        let scheme = database.url.split(':').next().unwrap_or_default();
+        if scheme != "sqlite" {
+            return Err(anyhow!(
+                "unsupported DATABASE_URL scheme `{scheme}`: this scaffold only supports sqlite:// URLs"
             ));
         }
         if database.connect_timeout_secs == 0 || database.idle_secs == 0 {
-            return Err(anyhow!("数据库连接超时和空闲超时必须大于 0"));
+            return Err(anyhow!(
+                "database connect timeout and idle timeout must be greater than 0"
+            ));
         }
 
-        let max_log_files = parse_env_or("LOG_MAX_LOG_FILES", 30_usize)?;
+        let max_log_files = parse_env_or("LOG_MAX_LOG_FILES", 60_usize)?;
         if max_log_files == 0 {
-            return Err(anyhow!("LOG_MAX_LOG_FILES 必须大于 0"));
+            return Err(anyhow!("LOG_MAX_LOG_FILES must be greater than 0"));
         }
 
         let batch_max_events = parse_env_or("LOG_BATCH_MAX_EVENTS", 50_usize)?;
         let batch_flush_interval_secs = parse_env_or("LOG_BATCH_FLUSH_INTERVAL_SECS", 3_u64)?;
         if batch_max_events == 0 || batch_flush_interval_secs == 0 {
-            return Err(anyhow!("日志批量参数必须大于 0"));
+            return Err(anyhow!("log batch parameters must be greater than 0"));
         }
 
         let logging = LoggingConfig {
@@ -156,10 +176,10 @@ impl AppConfig {
                 "MINUTELY" | "Rotation::MINUTELY" => Rotation::MINUTELY,
                 "NEVER" | "Rotation::NEVER" => Rotation::NEVER,
                 "WEEKLY" | "Rotation::WEEKLY" => Rotation::WEEKLY,
-                value => return Err(anyhow!("不支持的日志轮转策略: {value}")),
+                value => return Err(anyhow!("unsupported log rotation strategy: {value}")),
             },
             max_log_files,
-            out_dir: get_env_or("LOG_OUT_DIR", "/var/log/axum-app"),
+            out_dir: get_env_or("LOG_OUT_DIR", "./log"),
             batch_max_events,
             batch_flush_interval_secs,
         };
@@ -175,6 +195,10 @@ impl AppConfig {
                 "MIDDLEWARE_HSTS_ENABLED",
                 app_env.eq_ignore_ascii_case("production"),
             )?,
+            cors_allowed_origins: parse_origins(&get_env_or(
+                "MIDDLEWARE_CORS_ALLOWED_ORIGINS",
+                "",
+            ))?,
         };
 
         if middleware.request_timeout_secs == 0
@@ -184,7 +208,9 @@ impl AppConfig {
             || middleware.rate_limit_requests == 0
             || middleware.rate_limit_period_secs == 0
         {
-            return Err(anyhow!("MIDDLEWARE 容量参数必须大于 0"));
+            return Err(anyhow!(
+                "MIDDLEWARE capacity parameters must be greater than 0"
+            ));
         }
 
         Ok(Self {
@@ -200,11 +226,28 @@ impl AppConfig {
 }
 
 fn get_required_env(key: &str) -> Result<String> {
-    env::var(key).with_context(|| format!("缺少必需环境变量: {key}"))
+    env::var(key).with_context(|| format!("missing required environment variable: {key}"))
 }
 
 fn get_env_or(key: &str, default: &str) -> String {
     env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+/// 把逗号分隔的来源白名单解析成列表，非法条目直接拒绝启动。
+fn parse_origins(raw: &str) -> Result<Vec<String>> {
+    let mut origins = Vec::new();
+    for origin in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
+        HeaderValue::from_str(origin).map_err(|error| {
+            anyhow!("invalid MIDDLEWARE_CORS_ALLOWED_ORIGINS entry {origin}: {error}")
+        })?;
+        origins.push(origin.to_string());
+    }
+
+    Ok(origins)
 }
 
 fn parse_env_or<T>(key: &str, default: T) -> Result<T>
@@ -215,7 +258,7 @@ where
     match env::var(key) {
         Ok(value) => value
             .parse::<T>()
-            .map_err(|error| anyhow!("环境变量 {key} 解析失败: {error}")),
+            .map_err(|error| anyhow!("failed to parse environment variable {key}: {error}")),
         Err(_) => Ok(default),
     }
 }

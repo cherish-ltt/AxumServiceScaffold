@@ -49,8 +49,8 @@ impl ExampleDetail {
     pub fn new(id: String, current_user: CurrentUser) -> Self {
         Self {
             id,
-            title: "服务模板".to_string(),
-            description: "这是一个用于扩展新模块的详情接口模板。".to_string(),
+            title: "Service template".to_string(),
+            description: "A detail API template for extending new modules.".to_string(),
             requested_by: current_user.username,
             roles: current_user.roles,
         }

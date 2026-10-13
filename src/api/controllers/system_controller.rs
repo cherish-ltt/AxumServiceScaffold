@@ -9,7 +9,7 @@ use crate::{
     response::ApiResponse,
 };
 
-#[cfg(debug_assertions)]
+#[cfg(feature = "docs")]
 use crate::docs::{DocErrorResponse, DocHealthResponse, DocMessageResponse, DocWelcomeResponse};
 
 pub fn router() -> Router<Arc<Container>> {
@@ -18,12 +18,12 @@ pub fn router() -> Router<Arc<Container>> {
         .route("/system/ready", get(ready))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/",
     tag = "System",
     responses(
-        (status = 200, description = "服务首页返回成功", body = DocWelcomeResponse)
+        (status = 200, description = "Welcome page returned", body = DocWelcomeResponse)
     )
 ))]
 pub async fn root(
@@ -33,13 +33,13 @@ pub async fn root(
     Ok(ApiResponse::ok(welcome.into()))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/system/health",
     tag = "System",
     responses(
-        (status = 200, description = "健康检查通过", body = DocHealthResponse),
-        (status = 503, description = "服务降级或数据库不可用", body = DocHealthResponse)
+        (status = 200, description = "Health check passed", body = DocHealthResponse),
+        (status = 503, description = "Service degraded or database unavailable", body = DocHealthResponse)
     )
 ))]
 pub async fn health(
@@ -47,19 +47,22 @@ pub async fn health(
 ) -> Result<ApiResponse<HealthResponse>, AppError> {
     let health = container.system_service.health().await?;
 
-    Ok(ApiResponse::ok_with_message("健康检查完成", health.into()))
+    Ok(ApiResponse::ok_with_message(
+        "Health check completed",
+        health.into(),
+    ))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/system/ready",
     tag = "System",
     responses(
-        (status = 200, description = "服务已就绪", body = DocMessageResponse),
-        (status = 503, description = "服务尚未就绪", body = DocErrorResponse)
+        (status = 200, description = "Service ready", body = DocMessageResponse),
+        (status = 503, description = "Service not ready", body = DocErrorResponse)
     )
 ))]
 pub async fn ready(State(container): State<Arc<Container>>) -> Result<ApiResponse<()>, AppError> {
     container.system_service.ready().await?;
-    Ok(ApiResponse::message("服务已就绪"))
+    Ok(ApiResponse::message("Service ready"))
 }

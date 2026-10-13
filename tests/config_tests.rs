@@ -21,13 +21,32 @@ fn remove_var(key: &str) {
     unsafe { env::remove_var(key) };
 }
 
-/// 临时设置环境变量后执行断言，结束时恢复原始值。
+/// 断言结束（含 panic）时恢复环境变量的守卫：panic 展开也会执行 Drop。
+struct EnvRestore {
+    saved: Vec<(String, Option<String>)>,
+}
+
+impl Drop for EnvRestore {
+    fn drop(&mut self) {
+        for (key, value) in &self.saved {
+            match value {
+                Some(value) => set_var(key, value),
+                None => remove_var(key),
+            }
+        }
+    }
+}
+
+/// 临时设置环境变量后执行断言，结束时（含断言 panic）恢复原始值。
 fn with_env<F: FnOnce()>(vars: &[(&str, Option<&str>)], assertion: F) {
     let _lock = env_lock();
     let saved: Vec<(String, Option<String>)> = vars
         .iter()
         .map(|(key, _)| (key.to_string(), env::var(key).ok()))
         .collect();
+
+    // 先挂上恢复守卫，再改环境变量：无论 assertion 是否 panic，都会恢复。
+    let _restore = EnvRestore { saved };
 
     for (key, value) in vars {
         match value {
@@ -37,13 +56,6 @@ fn with_env<F: FnOnce()>(vars: &[(&str, Option<&str>)], assertion: F) {
     }
 
     assertion();
-
-    for (key, value) in saved {
-        match value {
-            Some(value) => set_var(&key, &value),
-            None => remove_var(&key),
-        }
-    }
 }
 
 const EXAMPLE_SECRET: &str = "change-me-to-a-random-string-with-at-least-32-characters";
@@ -90,6 +102,7 @@ fn valid_config_loads_with_defaults() {
             ("MIDDLEWARE_RATE_LIMIT_REQUESTS", None),
             ("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", None),
             ("MIDDLEWARE_HSTS_ENABLED", None),
+            ("MIDDLEWARE_CORS_ALLOWED_ORIGINS", None),
         ],
         || {
             let config = AppConfig::from_env().expect("默认配置应可加载");
@@ -102,7 +115,7 @@ fn valid_config_loads_with_defaults() {
             assert_eq!(config.database.min_connections, 1);
             assert_eq!(config.database.max_connections, 10);
             assert_eq!(config.database.connect_timeout_secs, 8);
-            assert_eq!(config.database.idle_secs, 30);
+            assert_eq!(config.database.idle_secs, 60);
             assert!(!config.database.sqlx_logging);
             assert_eq!(config.jwt.issuer, "axum-service-scaffold");
             assert_eq!(config.jwt.audience, "axum-service-clients");
@@ -110,8 +123,8 @@ fn valid_config_loads_with_defaults() {
             assert_eq!(config.logging.filter, "info,tower_http=info");
             assert_eq!(config.logging.filename_prefix, "app");
             assert_eq!(config.logging.filename_suffix, "log");
-            assert_eq!(config.logging.max_log_files, 30);
-            assert_eq!(config.logging.out_dir, "/var/log/axum-app");
+            assert_eq!(config.logging.max_log_files, 60);
+            assert_eq!(config.logging.out_dir, "./log");
             assert_eq!(config.logging.batch_max_events, 50);
             assert_eq!(config.logging.batch_flush_interval_secs, 3);
             assert!(rotation_debug(&config.logging.rotation).contains("daily"));
@@ -123,6 +136,7 @@ fn valid_config_loads_with_defaults() {
             assert_eq!(config.middleware.rate_limit_requests, 32768);
             assert_eq!(config.middleware.rate_limit_period_secs, 1);
             assert!(!config.middleware.hsts_enabled);
+            assert!(config.middleware.cors_allowed_origins.is_empty());
         },
     );
 }
@@ -214,7 +228,11 @@ fn production_rejects_example_jwt_secret() {
 fn missing_jwt_secret_is_rejected() {
     with_env(&[("JWT_SECRET", None)], || {
         let error = AppConfig::from_env().expect_err("缺少 JWT_SECRET 应被拒绝");
-        assert!(error.to_string().contains("缺少必需环境变量"));
+        assert!(
+            error
+                .to_string()
+                .contains("missing required environment variable")
+        );
     });
 }
 
@@ -222,7 +240,7 @@ fn missing_jwt_secret_is_rejected() {
 fn short_jwt_secret_is_rejected() {
     with_env(&[("JWT_SECRET", Some("too-short"))], || {
         let error = AppConfig::from_env().expect_err("过短的 JWT_SECRET 应被拒绝");
-        assert!(error.to_string().contains("长度至少需要 32"));
+        assert!(error.to_string().contains("at least 32 characters"));
     });
 }
 
@@ -235,7 +253,7 @@ fn non_positive_token_ttl_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("非正数 TTL 应被拒绝");
-            assert!(error.to_string().contains("必须大于 0"));
+            assert!(error.to_string().contains("must be greater than 0"));
         },
     );
 }
@@ -249,7 +267,11 @@ fn zero_min_connections_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("0 最小连接数应被拒绝");
-            assert!(error.to_string().contains("连接池参数无效"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid database pool parameters")
+            );
         },
     );
 }
@@ -263,7 +285,11 @@ fn min_connections_above_max_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("最小连接数大于最大连接数应被拒绝");
-            assert!(error.to_string().contains("连接池参数无效"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid database pool parameters")
+            );
         },
     );
 }
@@ -277,7 +303,7 @@ fn zero_connect_timeout_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("0 连接超时应被拒绝");
-            assert!(error.to_string().contains("超时必须大于 0"));
+            assert!(error.to_string().contains("timeout must be greater than 0"));
         },
     );
 }
@@ -291,7 +317,7 @@ fn zero_idle_timeout_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("0 空闲超时应被拒绝");
-            assert!(error.to_string().contains("超时必须大于 0"));
+            assert!(error.to_string().contains("timeout must be greater than 0"));
         },
     );
 }
@@ -304,7 +330,9 @@ fn zero_batch_params_are_rejected() {
             || {
                 let error = AppConfig::from_env().expect_err("批量参数为 0 应被拒绝");
                 assert!(
-                    error.to_string().contains("日志批量参数必须大于 0"),
+                    error
+                        .to_string()
+                        .contains("log batch parameters must be greater than 0"),
                     "{key} 的报错信息不符合预期: {error}"
                 );
             },
@@ -321,7 +349,11 @@ fn zero_max_log_files_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("0 日志文件数应被拒绝");
-            assert!(error.to_string().contains("LOG_MAX_LOG_FILES 必须大于 0"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("LOG_MAX_LOG_FILES must be greater than 0")
+            );
         },
     );
 }
@@ -335,7 +367,11 @@ fn unsupported_log_rotation_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("不支持的轮转策略应被拒绝");
-            assert!(error.to_string().contains("不支持的日志轮转策略"));
+            assert!(
+                error
+                    .to_string()
+                    .contains("unsupported log rotation strategy")
+            );
         },
     );
 }
@@ -349,7 +385,7 @@ fn invalid_server_port_is_rejected() {
         ],
         || {
             let error = AppConfig::from_env().expect_err("非法端口应被拒绝");
-            assert!(error.to_string().contains("解析失败"));
+            assert!(error.to_string().contains("failed to parse"));
         },
     );
 }
@@ -385,6 +421,10 @@ fn middleware_overrides_are_applied() {
             ("MIDDLEWARE_RATE_LIMIT_REQUESTS", Some("50")),
             ("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", Some("2")),
             ("MIDDLEWARE_HSTS_ENABLED", Some("true")),
+            (
+                "MIDDLEWARE_CORS_ALLOWED_ORIGINS",
+                Some("https://a.example, https://b.example ,"),
+            ),
         ],
         || {
             let config = AppConfig::from_env().expect("中间件覆盖项应可加载");
@@ -396,6 +436,35 @@ fn middleware_overrides_are_applied() {
             assert_eq!(config.middleware.rate_limit_requests, 50);
             assert_eq!(config.middleware.rate_limit_period_secs, 2);
             assert!(config.middleware.hsts_enabled);
+            assert_eq!(
+                config.middleware.cors_allowed_origins,
+                vec![
+                    "https://a.example".to_string(),
+                    "https://b.example".to_string()
+                ]
+            );
+        },
+    );
+}
+
+#[test]
+fn invalid_cors_origin_is_rejected() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            (
+                "MIDDLEWARE_CORS_ALLOWED_ORIGINS",
+                Some("https://a.example\nX-Evil: 1"),
+            ),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("非法来源应被拒绝");
+            assert!(
+                error
+                    .to_string()
+                    .contains("invalid MIDDLEWARE_CORS_ALLOWED_ORIGINS entry"),
+                "报错信息不符合预期: {error}"
+            );
         },
     );
 }
@@ -430,8 +499,34 @@ fn zero_middleware_capacity_is_rejected() {
             || {
                 let error = AppConfig::from_env().expect_err("容量参数为 0 应被拒绝");
                 assert!(
-                    error.to_string().contains("MIDDLEWARE 容量参数必须大于 0"),
+                    error
+                        .to_string()
+                        .contains("MIDDLEWARE capacity parameters must be greater than 0"),
                     "{key} 的报错信息不符合预期: {error}"
+                );
+            },
+        );
+    }
+}
+
+/// 脚手架只支持 SQLite：迁移文件与补列逻辑都依赖 SQLite 语法，其他后端必须启动即拒。
+#[test]
+fn non_sqlite_database_url_is_rejected() {
+    for url in [
+        "postgres://localhost/app",
+        "mysql://localhost/app",
+        "app.db",
+    ] {
+        with_env(
+            &[
+                ("JWT_SECRET", Some(CUSTOM_SECRET)),
+                ("DATABASE_URL", Some(url)),
+            ],
+            || {
+                let error = AppConfig::from_env().expect_err("非 SQLite 连接串应被拒绝");
+                assert!(
+                    error.to_string().contains("only supports sqlite:// URLs"),
+                    "{url} 的报错信息不符合预期: {error}"
                 );
             },
         );

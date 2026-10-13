@@ -87,13 +87,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy (lints)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --features docs -- -D warnings
+
+      - name: Check release + docs combination
+        run: cargo check --release --features docs
 
       - name: Build the project
         run: cargo build --verbose
 
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --features docs --verbose
 
 ```
 
@@ -166,14 +169,33 @@ match_block_trailing_comma = true
 
 ```toml
 # ── Clippy Configuration ──
+# 本文件只配置「lint 的阈值 / 开关」；阈值只有在对应 lint 被启用时才会生效，
+# 已启用的 lint 列在 Cargo.toml 的 [lints.clippy]（作用于本包全部 target）。
+
+# clippy::cognitive_complexity 的阈值（已启用）
 cognitive-complexity-threshold = 15
+# clippy::too_many_arguments 的阈值（complexity 组，clippy 默认即启用）
 too-many-arguments-threshold = 5
-too-many-lines-threshold = 30
+# clippy::unwrap_used 在测试代码中放行（已启用）
 allow-unwrap-in-tests = true
+
 msrv = "1.99.0"
 ```
 
-所有代码必须通过 `cargo clippy --all-targets -- -D warnings` 检查，无警告。
+启用位置（**必须**与 `.clippy.toml` 的注释保持一致）：
+
+- `src/lib.rs` 顶部的 `#![warn(clippy::cognitive_complexity, clippy::unwrap_used)]` —— 覆盖全部生产代码
+  与 `src/` 内的单元测试；`tests/` 集成测试不适用（用例的 setup / 断言天然长而分支多）。
+- **只写阈值不启用 lint 等于阈值不生效**：`cognitive_complexity` 属于 nursery、`too_many_lines` 属于
+  pedantic、`unwrap_used` 属于 restriction，三者默认都是 `allow`。新增阈值时必须同时在
+  `src/lib.rs` 启用对应 lint，否则就是一份“看起来很严”的假配置。
+- 故意**不启用**的两个 lint：`too_many_lines`（pedantic，30 行阈值会把配置快照、中间件装配
+  这类线性代码全部判为超标，拆分反而降低可读性）与 `expect_used`（restriction，在集成测试的
+  辅助函数里噪声过大）。改代码而不是调阈值。
+
+所有代码必须通过 `cargo clippy --all-targets --features docs -- -D warnings` 检查，无警告
+（与 CI 一致；`docs` feature 必须打开，否则文档代码不在检查范围内）。`--all-features` 会额外
+编译 `preset` / `http-client` 两个可选依赖 bundle，pre-commit 钩子用它做本地兜底。
 
 ---
 
@@ -245,12 +267,15 @@ msrv = "1.99.0"
 - 容量参数只允许定义在 `MiddlewareConfig`（`src/infrastructure/config.rs`）并从 `.env` 读取；
   中间件代码中不得出现字面量。新增参数必须同步 `.env`、`.env-example`、`tests/config_tests.rs`。
 - 代码兜底默认值必须与 `.env-example` 保持一致（当前：并发 256、背压队列 256、限流 32768 req/s、
-  超时 10s、Body 2 MiB、周期 1s）；修改任一侧都必须同步另一侧与 README「中间件配置」表格。
+  超时 10s、Body 2 MiB、周期 1s）；修改任一侧都必须同步另一侧与 `docs/MIDDLEWARE.md` 的「中间件配置」表格。
 - 中间件的错误响应必须复用 `ApiResponse::error(status, message)`，与业务错误 `AppError`
   的响应格式保持一致；不要在中间件里手写 JSON。
 - 并发限制与限速是两个维度：并发限制约束在途请求数，限速约束单位时间请求数；
   两者均为**进程级**实现，多实例部署需在网关或共享存储层补齐分布式限流。
-- 调整执行顺序、新增或移除中间件时，必须同步更新 `README.md` 的「中间件栈」章节与
+- **CORS 也必须在栈里**：`CorsLayer` 由 `middleware/stack.rs` 的 `cors_layer(config)` 装配
+  （栈的最内层），来源白名单读 `MIDDLEWARE_CORS_ALLOWED_ORIGINS`；禁止在 `create_app`
+  或 controller 里直接挂 `CorsLayer::permissive()`，默认必须是不发任何 CORS 头。
+- 调整执行顺序、新增或移除中间件时，必须同步更新 `docs/MIDDLEWARE.md` 的「中间件栈」章节与
   `docs/CHANGELOG.md`，并在 `tests/middleware_tests.rs` 补对应断言（至少覆盖超时、Body 超限、
   背压 503、限流 429、`request_id` 关联）。
 - 需要断言日志内容的测试必须单独成进程（如 `tests/middleware_log_tests.rs`）：`tracing` 的
@@ -273,8 +298,8 @@ msrv = "1.99.0"
   保证「条数」计数与日志行一一对应，禁止直接计数 fmt 层的分段写入。
 - 进程退出时必须停止定时刷盘线程并落盘剩余缓冲（`BatchGuard::drop`），不得丢日志。
 - 批量参数属于日志配置（`LoggingConfig`），走 `.env`；新增/调整时必须同步 `.env`、
-  `.env-example`、`tests/config_tests.rs`（默认值、覆盖项、0 值校验）、README「日志写入：分批落盘」
-  章节与 `docs/CHANGELOG.md`；任一项为 `0` 拒绝启动。
+  `.env-example`、`tests/config_tests.rs`（默认值、覆盖项、0 值校验）、`docs/LOGGING.md` 的
+  「日志写入：分批落盘」章节与 `docs/CHANGELOG.md`；任一项为 `0` 拒绝启动。
 - 依赖约束：`tracing-subscriber`、`tracing-appender` 为正式依赖，不得为分批写入引入
   额外的异步通道/缓冲依赖（用 `std::thread` + `std::sync::mpsc` 实现定时刷盘）。
 
@@ -285,6 +310,27 @@ msrv = "1.99.0"
   末行 `详见 docs/CHANGELOG.md`。
 - 已推送的 tag 如需补充或修正 message，先删除本地与远程 tag 再重打重推
   （`git tag -d` + `git push origin :refs/tags/<tag>`），避免 tag 内容与实际发布不符。
+
+### 10.9 OpenAPI 文档（`docs` feature）
+
+- Swagger UI 与 OpenAPI 文档（`src/docs.rs`、`utoipa`/`utoipa-swagger-ui`）统一由
+  `cfg(feature = "docs")`（Cargo 的 `docs` feature）门控，**禁止**回到
+  `cfg(debug_assertions)`：`docs` feature 不进 `default`，release 与默认构建均不编译
+  utoipa 及其文档代码。开发时用 `cargo run --features docs` 访问 `/swagger-ui` 与
+  `/api-doc/openapi.json`。
+- 仅调试专用的开发行为（dev-login / dev-transfer 路由注册、DTO 的 `force_fail` 字段
+  与 `From` 实现等）仍使用 `cfg(debug_assertions)`，与文档开关相互独立。
+- controller / DTO 上的 `#[cfg_attr(debug_assertions, utoipa::path(...))]`、
+  `derive(ToSchema/IntoParams)`、`schema(example=...)` 等注解改投 `feature = "docs"`；
+  CI 的 clippy 与 test 步骤使用 `--features docs`（见第 2 节），确保文档代码也在检查范围内。
+- `system` 响应的 `docs_enabled` 字段跟随 `cfg!(feature = "docs")`。
+- **`docs` feature 与 `debug_assertions` 正交，四种组合都必须可编译**：
+  `utoipa::path` 仅为实际编译的 handler 生成 `__path_*`，因此仅调试存在的
+  handler（`dev_login` / `dev_transfer`）的文档必须放在 `src/docs.rs` 里
+  单独 `#[cfg(debug_assertions)]` 的 `DevApiDoc`，再通过
+  `OpenApi::merge_from` 合入主文档；禁止直接写进主 `ApiDoc` 的 `paths(...)`
+  （release + docs 下会因找不到 `__path_*` 编译失败）。CI 的
+  `cargo check --release --features docs` 步骤（见第 2 节）负责守住这条约束。
 
 **本文件是项目的“开发宪法”，所有 pull request 和代码审查均应参照其内容。**
 
@@ -322,7 +368,7 @@ msrv = "1.99.0"
 - controller 直接返回 `ApiResponse<T>`（已实现 `IntoResponse`），不要再手动包裹 `Json`。
 - `204 No Content` 等不带响应体的状态码不属于 `ApiResponse` 职责，由 handler 直接返回 `StatusCode`。
 - `domain` 层不引入 `http::StatusCode`，错误状态码仍以 `AppError::http_code() -> u16` 表达，在外层 `src/error.rs` 才映射为 `StatusCode`。
-- 修改响应结构时必须同步更新 `README.md` 的「统一响应结构」章节与 `docs/CHANGELOG.md`。
+- 修改响应结构时必须同步更新 `docs/RESPONSE.md` 的「统一响应结构」章节与 `docs/CHANGELOG.md`。
 
 ### 10.5 事务与持久化
 
@@ -332,10 +378,22 @@ msrv = "1.99.0"
 - 仓储方法签名统一接收 `C: ConnectionTrait`：传入 `&DatabaseConnection` 表示不进事务，传入 `&DatabaseTransaction` 表示在调用方事务内执行；禁止为事务单独复制一套方法。
 - 仓储接口因引用 `sea_orm::ConnectionTrait` 而归入 `infrastructure/repositories`，`domain/repositories` 只保留边界说明；`domain` 不得依赖 `sea-orm`。
 - 含泛型方法的 trait 无法作为 `dyn` 使用，仓储通过泛型参数注入 `services`；对外用例接口（`domain/services`）保持 `dyn` 兼容，由 `container.rs` 装配。
-- 读改写场景必须开启 `IsolationLevel::Serializable` 事务；金额、数量用整数最小单位表示（如 `amount_cents: i64`），禁止浮点。
-- 需要并发控制的表维护自增 `version` 列，更新时一并自增，不做静默覆盖。
-- 新增实体放在 `src/entities` 下独立文件，并在 `infrastructure/databases/schema.rs` 补对应的 `CREATE TABLE`；种子数据必须幂等（`NOT EXISTS` 或等价写法）。
+- 读改写场景必须开启写事务：SQLite 不支持在事务内切换隔离级别（`IsolationLevel` 会被
+  sea-orm 忽略并打 warn），必须用 `begin_with_options(TransactionOptions { sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate), .. })`；
+  金额、数量用整数最小单位表示（如 `amount_cents: i64`），禁止浮点。
+- 需要并发控制的表维护自增 `version` 列，更新时以 `WHERE id = ? AND version = <读取时的值>`
+  做条件更新并自增 `version`；影响行数为 0 表示期间被其他事务改过，必须返回 `AppError::Conflict`（409），
+  不得把 `update_many` 的「0 行」当成成功而静默覆盖。
+- 新增实体放在 `src/entities` 下独立文件，并在 `migrations/` 目录新增对应的 sqlx 迁移文件
+  （`CREATE TABLE`，由 `databases::run_migrations` 以 `sqlx::migrate!` 执行）；
+  种子数据必须幂等（`NOT EXISTS` 或等价写法）。
+- **当前只支持 SQLite**：迁移文件与 `schema.rs` 的补列/索引逻辑都是 SQLite 语法
+  （`pragma_table_info`）。`DATABASE_URL` 必须在 `AppConfig::from_env` 阶段校验为 `sqlite:` 开头，
+  非法 scheme 拒绝启动；要换 MySQL/PostgreSQL 必须同时把迁移与补列逻辑重写成后端无关的写法。
 - 每个事务用例至少覆盖「提交成功」与「中途失败回滚后数据无残留」两类测试，回滚测试需断言失败前状态未被改变。
-- 唯一约束冲突属于客户端可控冲突，在 `From<DbErr>` 中统一映射为 `AppError::Conflict`（409）并透出可读原因，不得当作 500 处理；幂等键一类业务唯一列必须建唯一索引，不能只靠先查后写。
+- 唯一约束冲突属于客户端可控冲突，在 `From<DbErr>` 中统一映射为 `AppError::Conflict`（409），
+  响应文案用稳定描述（如 `resource already exists`），**不得**把数据库原始 detail（含表名、列名）
+  透给客户端，只写 `debug` 日志；也不得当作 500 处理。幂等键一类业务唯一列必须建唯一索引，
+  不能只靠先查后写。
 - 数据库文件不得入库（`.gitignore` 排除）：建表、索引与种子数据必须由启动流程自动完成且幂等，表结构变更需同时提供老库的自动补齐路径。
 - 参考实现：`src/services/transaction.rs`、`src/infrastructure/repositories/transaction.rs`。

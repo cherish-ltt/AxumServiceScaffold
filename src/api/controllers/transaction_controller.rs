@@ -19,13 +19,14 @@ use crate::{
 use axum::{Json, routing::post};
 
 #[cfg(debug_assertions)]
-use crate::{
-    api::dto::transaction::{TransferReceiptResponse, TransferRequest},
-    docs::{
-        DocErrorResponse, DocTransferDetailResponse, DocTransferListResponse,
-        DocTransferReceiptResponse,
-    },
-};
+use crate::api::dto::transaction::{TransferReceiptResponse, TransferRequest};
+
+#[cfg(feature = "docs")]
+use crate::docs::{DocErrorResponse, DocTransferDetailResponse, DocTransferListResponse};
+
+// 仅 dev_transfer 的文档引用该响应结构，随 handler 一起按构建类型裁剪。
+#[cfg(all(feature = "docs", debug_assertions))]
+use crate::docs::DocTransferReceiptResponse;
 
 pub fn router() -> Router<Arc<Container>> {
     let router = Router::new()
@@ -38,7 +39,7 @@ pub fn router() -> Router<Arc<Container>> {
     router
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/transactions",
     tag = "Transaction",
@@ -47,9 +48,9 @@ pub fn router() -> Router<Arc<Container>> {
         ("bearer_auth" = [])
     ),
     responses(
-        (status = 200, description = "转账流水分页查询成功", body = DocTransferListResponse),
-        (status = 400, description = "分页参数错误", body = DocErrorResponse),
-        (status = 401, description = "未授权或令牌无效", body = DocErrorResponse)
+        (status = 200, description = "Transfer records fetched (paginated)", body = DocTransferListResponse),
+        (status = 400, description = "Invalid pagination parameters", body = DocErrorResponse),
+        (status = 401, description = "Unauthorized or invalid token", body = DocErrorResponse)
     )
 ))]
 pub async fn list_transfers(
@@ -65,20 +66,20 @@ pub async fn list_transfers(
     Ok(ApiResponse::ok(page.into()))
 }
 
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/transactions/{id}",
     tag = "Transaction",
     params(
-        ("id" = String, Path, description = "转账流水 ID")
+        ("id" = String, Path, description = "Transfer record ID")
     ),
     security(
         ("bearer_auth" = [])
     ),
     responses(
-        (status = 200, description = "流水详情与审计日志查询成功", body = DocTransferDetailResponse),
-        (status = 401, description = "未授权或令牌无效", body = DocErrorResponse),
-        (status = 404, description = "流水不存在", body = DocErrorResponse)
+        (status = 200, description = "Transfer detail and audit logs fetched", body = DocTransferDetailResponse),
+        (status = 401, description = "Unauthorized or invalid token", body = DocErrorResponse),
+        (status = 404, description = "Transfer record not found", body = DocErrorResponse)
     )
 ))]
 pub async fn get_transfer(
@@ -95,7 +96,7 @@ pub async fn get_transfer(
 ///
 /// release 构建不会注册该路由，事务示例请参考 `services/transaction.rs`。
 #[cfg(debug_assertions)]
-#[cfg_attr(debug_assertions, utoipa::path(
+#[cfg_attr(feature = "docs", utoipa::path(
     post,
     path = "/api/v1/transactions/dev-transfer",
     tag = "Transaction",
@@ -104,11 +105,11 @@ pub async fn get_transfer(
         ("bearer_auth" = [])
     ),
     responses(
-        (status = 200, description = "转账事务已提交", body = DocTransferReceiptResponse),
-        (status = 400, description = "请求参数错误或余额不足", body = DocErrorResponse),
-        (status = 401, description = "未授权或令牌无效", body = DocErrorResponse),
-        (status = 404, description = "账户不存在", body = DocErrorResponse),
-        (status = 500, description = "事务已回滚（force_fail 验证）", body = DocErrorResponse)
+        (status = 200, description = "Transfer transaction committed", body = DocTransferReceiptResponse),
+        (status = 400, description = "Bad request or insufficient balance", body = DocErrorResponse),
+        (status = 401, description = "Unauthorized or invalid token", body = DocErrorResponse),
+        (status = 404, description = "Account not found", body = DocErrorResponse),
+        (status = 500, description = "Transaction rolled back (force_fail verification)", body = DocErrorResponse)
     )
 ))]
 pub async fn dev_transfer(
@@ -119,7 +120,7 @@ pub async fn dev_transfer(
     let receipt = container.transfer_service.transfer(payload.into()).await?;
 
     Ok(ApiResponse::ok_with_message(
-        "转账事务已提交",
+        "Transfer transaction committed",
         receipt.into(),
     ))
 }

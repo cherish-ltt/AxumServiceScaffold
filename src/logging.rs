@@ -1,5 +1,6 @@
 use std::{
     io::{self, Write},
+    mem,
     sync::{Arc, Mutex, mpsc},
     thread::{self, JoinHandle},
     time::Duration,
@@ -37,14 +38,18 @@ pub fn init(config: &AppConfig) -> Result<BatchGuard> {
         config.logging.utc_offset_minute,
         config.logging.utc_offset_second,
     )
-    .context("日志时区偏移配置无效")?;
+    .context("invalid log timezone offset configuration")?;
     let timer = OffsetTime::new(
         offset,
         // 自定义时间格式：年-月-日 时:分:秒.毫秒
         format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:5]"),
     );
 
-    // 2. 配置日志滚动策略
+    // 2. 配置日志过滤级别（来自 .env）。先于文件句柄校验，配置非法时不留下任何副作用。
+    let env_filter = EnvFilter::try_new(config.logging.filter.clone())
+        .with_context(|| format!("invalid LOG_FILTER: {}", config.logging.filter))?;
+
+    // 3. 配置日志滚动策略
     let file_appender = RollingFileAppender::builder()
         // 按天切割（同时支持按大小切割，见下文）
         .rotation(config.logging.rotation.clone())
@@ -56,9 +61,9 @@ pub fn init(config: &AppConfig) -> Result<BatchGuard> {
         .max_log_files(config.logging.max_log_files)
         // .latest_symlink("app.latest.log") // 需要对应平台权限
         .build(config.logging.out_dir.clone())
-        .context("创建日志文件 appender 失败")?;
+        .context("failed to create log file appender")?;
 
-    // 3. 配置格式化层（输出到文件，分批写入）
+    // 4. 配置格式化层（输出到文件，分批写入）
     let file_writer = BatchFileWriter::new(
         file_appender,
         config.logging.batch_max_events,
@@ -73,12 +78,8 @@ pub fn init(config: &AppConfig) -> Result<BatchGuard> {
         ))
         .with_writer(file_writer.clone());
 
-    // 4. 控制台输出层（带颜色，实时输出）
+    // 5. 控制台输出层（带颜色，实时输出）
     let console_layer = fmt::layer().with_writer(std::io::stdout).with_timer(timer);
-
-    // 5. 配置日志过滤级别（来自 .env）
-    let env_filter = EnvFilter::try_new(config.logging.filter.clone())
-        .unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"));
 
     // 6. 初始化全局订阅者
     tracing_subscriber::registry()
@@ -86,7 +87,7 @@ pub fn init(config: &AppConfig) -> Result<BatchGuard> {
         .with(fmt_layer)
         .with(console_layer)
         .try_init()
-        .context("初始化全局日志订阅者失败")?;
+        .context("failed to initialize global log subscriber")?;
 
     // 7. 启动定时刷盘线程
     Ok(file_writer.start_flusher())
@@ -94,56 +95,118 @@ pub fn init(config: &AppConfig) -> Result<BatchGuard> {
 
 /// 打印本次启动实际生效的配置，便于事后追溯启动那一刻的参数。
 ///
-/// 按配置分组结构化输出；数据库连接串中的口令与 JWT 密钥只输出脱敏结果。
+/// 以手绘 ASCII 列表框输出，按配置分组；多行消息由 fmt 层逐行打印，
+/// 控制台与文件层行为一致。数据库连接串中的口令与 JWT 密钥只输出脱敏结果。
 pub fn log_startup_config(config: &AppConfig) {
-    let server = &config.server;
+    const WIDTH: usize = 64;
+    let equals = format!("+{}+", "=".repeat(WIDTH));
+    let dashes = format!("+{}+", "-".repeat(WIDTH));
+    let mut lines = vec![
+        String::new(),
+        equals.clone(),
+        format!("|{:^width$}|", "", width = WIDTH),
+        format!("|{:^width$}|", "startup configuration", width = WIDTH),
+        format!("|{:^width$}|", "", width = WIDTH),
+        equals,
+    ];
+
     let database = &config.database;
     let jwt = &config.jwt;
     let logger = &config.logging;
     let middleware = &config.middleware;
+    let server = &config.server;
 
-    tracing::info!(app_name = %config.app_name, app_env = %config.app_env, "启动配置: 应用");
-    tracing::info!(host = %server.host, port = server.port, "启动配置: 服务");
-    tracing::info!(
-        url = %mask_url(&database.url),
-        min_connections = database.min_connections,
-        max_connections = database.max_connections,
-        connect_timeout_secs = database.connect_timeout_secs,
-        idle_secs = database.idle_secs,
-        sqlx_logging = database.sqlx_logging,
-        "启动配置: 数据库"
+    push_section(
+        &mut lines,
+        &dashes,
+        "application",
+        vec![
+            format!("app_name={}", config.app_name),
+            format!("app_env={}", config.app_env),
+        ],
     );
-    tracing::info!(
-        secret = %mask_secret(&jwt.secret),
-        issuer = %jwt.issuer,
-        audience = %jwt.audience,
-        access_token_ttl_minutes = jwt.access_token_ttl_minutes,
-        "启动配置: JWT"
+    push_section(
+        &mut lines,
+        &dashes,
+        "server",
+        vec![
+            format!("host={}", server.host),
+            format!("port={}", server.port),
+        ],
     );
-    tracing::info!(
-        filter = %logger.filter,
-        utc_offset_hour = logger.utc_offset_hour,
-        utc_offset_minute = logger.utc_offset_minute,
-        utc_offset_second = logger.utc_offset_second,
-        out_dir = %logger.out_dir,
-        filename_prefix = %logger.filename_prefix,
-        filename_suffix = %logger.filename_suffix,
-        rotation = ?logger.rotation,
-        max_log_files = logger.max_log_files,
-        batch_max_events = logger.batch_max_events,
-        batch_flush_interval_secs = logger.batch_flush_interval_secs,
-        "启动配置: 日志"
+    push_section(
+        &mut lines,
+        &dashes,
+        "database",
+        vec![
+            format!("url={}", mask_url(&database.url)),
+            format!("min_connections={}", database.min_connections),
+            format!("max_connections={}", database.max_connections),
+            format!("connect_timeout_secs={}", database.connect_timeout_secs),
+            format!("idle_secs={}", database.idle_secs),
+            format!("sqlx_logging={}", database.sqlx_logging),
+        ],
     );
-    tracing::info!(
-        request_timeout_secs = middleware.request_timeout_secs,
-        max_body_bytes = middleware.max_body_bytes,
-        max_concurrency = middleware.max_concurrency,
-        backpressure_queue = middleware.backpressure_queue,
-        rate_limit_requests = middleware.rate_limit_requests,
-        rate_limit_period_secs = middleware.rate_limit_period_secs,
-        hsts_enabled = middleware.hsts_enabled,
-        "启动配置: 中间件"
+    push_section(
+        &mut lines,
+        &dashes,
+        "jwt",
+        vec![
+            format!("secret={}", mask_secret(&jwt.secret)),
+            format!("issuer={}", jwt.issuer),
+            format!("audience={}", jwt.audience),
+            format!("access_token_ttl_minutes={}", jwt.access_token_ttl_minutes),
+        ],
     );
+    push_section(
+        &mut lines,
+        &dashes,
+        "logging",
+        vec![
+            format!("filter={}", logger.filter),
+            format!("utc_offset_hour={}", logger.utc_offset_hour),
+            format!("utc_offset_minute={}", logger.utc_offset_minute),
+            format!("utc_offset_second={}", logger.utc_offset_second),
+            format!("out_dir={}", logger.out_dir),
+            format!("filename_prefix={}", logger.filename_prefix),
+            format!("filename_suffix={}", logger.filename_suffix),
+            format!("rotation={:?}", logger.rotation),
+            format!("max_log_files={}", logger.max_log_files),
+            format!("batch_max_events={}", logger.batch_max_events),
+            format!(
+                "batch_flush_interval_secs={}",
+                logger.batch_flush_interval_secs
+            ),
+        ],
+    );
+    push_section(
+        &mut lines,
+        &dashes,
+        "middleware",
+        vec![
+            format!("request_timeout_secs={}", middleware.request_timeout_secs),
+            format!("max_body_bytes={}", middleware.max_body_bytes),
+            format!("max_concurrency={}", middleware.max_concurrency),
+            format!("backpressure_queue={}", middleware.backpressure_queue),
+            format!("rate_limit_requests={}", middleware.rate_limit_requests),
+            format!(
+                "rate_limit_period_secs={}",
+                middleware.rate_limit_period_secs
+            ),
+            format!("hsts_enabled={}", middleware.hsts_enabled),
+        ],
+    );
+
+    tracing::info!("{}", lines.join("\n"));
+}
+
+/// 追加一个配置分节：标题行、键值行与分隔线。
+fn push_section(lines: &mut Vec<String>, dashes: &str, title: &str, rows: Vec<String>) {
+    lines.push(format!("| [{title}]"));
+    for row in rows {
+        lines.push(format!("|   {row}"));
+    }
+    lines.push(dashes.to_string());
 }
 
 /// 把默认 `Format` 的输出先聚合成一行再交给底层 writer。
@@ -209,16 +272,35 @@ impl BatchFileWriter {
     }
 
     /// 把缓冲内容一次性写入文件并清空。
+    ///
+    /// 磁盘 IO 在锁外进行：先在锁内取走缓冲并重置计数，再释放锁写文件。
+    /// 否则定时刷盘或满批落盘时，所有写日志的线程会被写盘时间串行阻塞。
     fn flush(&self) -> io::Result<()> {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.buf.is_empty() {
-            return Ok(());
+        let (mut pending, pending_events) = {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.buf.is_empty() {
+                return Ok(());
+            }
+            (
+                mem::take(&mut state.buf),
+                mem::replace(&mut state.events, 0),
+            )
+        };
+
+        let write_result = {
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.write_all(&pending).and_then(|()| inner.flush())
+        };
+
+        if let Err(error) = write_result {
+            // 写盘失败时把内容放回缓冲队首，避免丢日志。
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            pending.extend_from_slice(&state.buf);
+            state.buf = pending;
+            state.events += pending_events;
+            return Err(error);
         }
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.write_all(&state.buf)?;
-        inner.flush()?;
-        state.buf.clear();
-        state.events = 0;
+
         Ok(())
     }
 
@@ -284,12 +366,12 @@ impl Drop for BatchGuard {
             let _ = thread.join();
         }
         if let Err(e) = self.writer.flush() {
-            tracing::error!("日志守卫退出时落盘失败: {e}");
+            tracing::error!("failed to flush logs on guard drop: {e}");
         }
     }
 }
 
-/// 隐藏连接串里的口令，保留其余结构以便核对目标库。，保留其余结构以便核对目标库。
+/// 隐藏连接串里的口令，保留其余结构以便核对目标库。
 ///
 /// 同时处理 `scheme://user:password@host/db` 与 `scheme://host/db?password=xxx`
 /// 两种写法：前者按最后一个 `@` 切分（口令里含 `@` 或 `:` 时也不会漏出），

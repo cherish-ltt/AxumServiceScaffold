@@ -50,6 +50,7 @@ fn test_config(out_dir: &str, utc_offset_hour: i8, utc_offset_minute: i8) -> App
             rate_limit_requests: 1000,
             rate_limit_period_secs: 1,
             hsts_enabled: false,
+            cors_allowed_origins: Vec::new(),
         },
     }
 }
@@ -65,14 +66,19 @@ fn logging_init_creates_log_file_in_configured_dir() {
         Err(e) => panic!("日志初始化应成功: {e}"),
     };
 
-    tracing::info!("logging 初始化测试日志");
+    tracing::info!("logging init test message");
     drop(guard);
 
-    let entries = std::fs::read_dir(&out_dir).expect("读取日志目录");
+    // 不只断言文件存在，还要断言写入的内容确实落盘（BatchGuard drop 时落盘剩余缓冲）。
+    let mut contents = String::new();
+    for entry in std::fs::read_dir(&out_dir).expect("读取日志目录").flatten() {
+        if entry.path().is_file() {
+            contents.push_str(&std::fs::read_to_string(entry.path()).expect("读取日志文件"));
+        }
+    }
     assert!(
-        entries.count() > 0,
-        "日志目录中应已创建日志文件: {}",
-        out_dir.display()
+        contents.contains("logging init test message"),
+        "日志文件应包含写入的日志行，实际内容:\n{contents}"
     );
 }
 
@@ -85,5 +91,24 @@ fn logging_init_rejects_invalid_utc_offset() {
         Ok(_) => panic!("非法时区偏移应被拒绝"),
         Err(e) => e,
     };
-    assert!(error.to_string().contains("日志时区偏移配置无效"));
+    assert!(
+        error
+            .to_string()
+            .contains("invalid log timezone offset configuration")
+    );
+}
+
+/// LOG_FILTER 是唯一真值来源：写错时必须拒绝启动，而不是静默换一套过滤规则。
+#[test]
+fn logging_init_rejects_invalid_filter() {
+    let mut config = test_config("/tmp/axum-scaffold-invalid-filter", 8, 0);
+    config.logging.filter = "info,missing=notalevel".to_string();
+
+    match logging::init(&config) {
+        Ok(_) => panic!("非法 LOG_FILTER 应被拒绝"),
+        Err(error) => assert!(
+            error.to_string().contains("invalid LOG_FILTER"),
+            "报错信息不符合预期: {error}"
+        ),
+    }
 }

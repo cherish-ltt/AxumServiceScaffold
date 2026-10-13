@@ -1,17 +1,20 @@
 [package]
 name = "axum-service-scaffold"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 rust-version = "1.99.0"
 authors = ["Guardian team"]
 license = "MIT OR Apache-2.0"
 description = "用于快速搭建 Axum + SeaORM 洋葱架构服务的 Rust 脚手架"
-repository = "https://github.com/cherry-llt/Guardian"
+repository = "https://github.com/cherish-ltt/AxumServiceScaffold"
 keywords = ["axum", "swagger", "seaorm", "jwt", "scaffold"]
 categories = ["web-programming", "development-tools"]
 
 [features]
-default = ["preset", "http-client"]
+# 默认构建只包含脚手架实际用到的依赖；预置库作为可选 bundle 按需开启：
+#   cargo build --features preset,http-client
+# `preset` 与 `http-client` 不在 default 里，避免所有使用者默认编译一批未被引用的库。
+default = []
 preset = [
   "dep:rayon",
   "dep:validator",
@@ -23,6 +26,9 @@ preset = [
   "dep:itertools",
 ]
 http-client = ["dep:reqwest"]
+# 仅开发/文档构建启用 Swagger：utoipa 与 swagger-ui 不进入默认与 release 编译
+#（docs_enabled 也跟随该 feature，见 services/system.rs）。
+docs = ["dep:utoipa", "dep:utoipa-swagger-ui"]
 
 [dependencies]
 # 错误处理与抽象
@@ -31,8 +37,7 @@ async-trait = "=0.1.92"
 thiserror = "=2.0.21"
 
 # Web 框架与 HTTP 中间件
-axum = { version = "=0.8.9", features = ["multipart"] }
-mime = "=0.3"
+axum = "=0.8.9"
 tower = { version = "=0.5.3", features = ["buffer", "limit", "load-shed"] }
 tower-http = { version = "=0.7.1", features = [
   "compression-gzip",
@@ -63,6 +68,14 @@ sea-orm = { version = "=2.0.4", features = [
   "runtime-tokio-rustls",
   "macros",
 ] }
+
+# SQL 迁移（与 sea-orm 共用同一 sqlx 版本，避免重复编译；TLS 后端由 sea-orm 侧并集提供）
+sqlx = { version = "=0.9.0", default-features = false, features = [
+  "runtime-tokio",
+  "sqlite",
+  "migrate",
+  "macros",
+] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 validator = { version = "=0.21.0", features = ["derive"], optional = true }
@@ -72,8 +85,8 @@ argon2 = "=0.6.0"
 jsonwebtoken = { version = "=11", features = ["aws_lc_rs"] }
 
 # 可观测性
-tracing = "=0.1"
-tracing-subscriber = { version = "=0.3", features = [
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = [
   "env-filter",
   "fmt",
   "time",
@@ -82,16 +95,19 @@ tracing-subscriber = { version = "=0.3", features = [
 tracing-appender = "=0.2.5"
 time = { version = "=0.3.55", features = ["macros"] }
 
-# OpenAPI 与调试文档
-utoipa = "=6.0.0"
-utoipa-swagger-ui = { version = "=10.0.1", features = ["axum", "vendored"] }
+# OpenAPI 与调试文档（需要时通过 --features docs 启用）
+utoipa = { version = "=6.0.0", optional = true }
+utoipa-swagger-ui = { version = "=10.0.1", features = [
+  "axum",
+  "vendored",
+], optional = true }
 
 # 常用外部调用与标识工具
 reqwest = { version = "=0.13.5", default-features = false, features = [
   "json",
   "rustls",
 ], optional = true }
-uuid = { version = "=1.27.0", features = ["v4", "v7", "serde"] }
+uuid = { version = "=1.27.0", features = ["v7"] }
 
 # ExtendTool
 derive_more = { version = "=2.1.1", optional = true }

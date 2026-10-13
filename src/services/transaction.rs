@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chrono::Local;
-use sea_orm::{DatabaseConnection, DatabaseTransaction, IsolationLevel, TransactionTrait};
+use sea_orm::{
+    DatabaseConnection, DatabaseTransaction, SqliteTransactionMode, TransactionOptions,
+    TransactionTrait,
+};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -21,6 +24,7 @@ use crate::{
 const DEFAULT_PAGE: u64 = 1;
 const DEFAULT_SIZE: u64 = 10;
 const MAX_SIZE: u64 = 100;
+const MAX_PAGE: u64 = 10_000;
 
 /// 转账事务示例的用例实现。
 ///
@@ -46,23 +50,28 @@ impl<R: TransferRepository> TransferUseCase for TransferService<R> {
         validate(&command)?;
 
         // 参数校验放在开启事务之前，避免为必然失败的请求占用连接。
+        // SQLite 不支持在事务内设置隔离级别（`IsolationLevel` 会被忽略）；改用 IMMEDIATE
+        // 让 BEGIN 时就拿到写锁，避免 DEFERRED 下并发读改写互相覆盖。
         let transaction = self
             .database
-            .begin_with_config(Some(IsolationLevel::Serializable), None)
+            .begin_with_options(TransactionOptions {
+                sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+                ..Default::default()
+            })
             .await?;
 
         match transfer_in_transaction(&transaction, self.repository.as_ref(), &command).await {
             Ok(receipt) => {
                 transaction.commit().await?;
-                info!(record_id = %receipt.record_id, "转账事务已提交");
+                info!(record_id = %receipt.record_id, "transfer transaction committed");
                 Ok(receipt)
             },
             Err(error) => {
                 // 回滚失败不覆盖业务错误：该连接会在归还连接池时被丢弃重建。
                 if let Err(rollback_error) = transaction.rollback().await {
-                    warn!(%rollback_error, "转账事务回滚失败");
+                    warn!(%rollback_error, "transfer transaction rollback failed");
                 }
-                info!(%error, "转账事务已回滚");
+                info!(%error, "transfer transaction rolled back");
                 Err(error)
             },
         }
@@ -70,14 +79,16 @@ impl<R: TransferRepository> TransferUseCase for TransferService<R> {
 
     async fn get_transfer(&self, record_id: String) -> Result<TransferDetail, AppError> {
         if record_id.trim().is_empty() {
-            return Err(AppError::not_found("流水 ID 不能为空"));
+            return Err(AppError::not_found("transfer record ID must not be empty"));
         }
 
         let record = self
             .repository
             .find_record(&self.database, &record_id)
             .await?
-            .ok_or_else(|| AppError::not_found(format!("流水 {record_id} 不存在")))?;
+            .ok_or_else(|| {
+                AppError::not_found(format!("transfer record {record_id} does not exist"))
+            })?;
         let audits = self
             .repository
             .list_audits(&self.database, &record_id)
@@ -93,12 +104,14 @@ impl<R: TransferRepository> TransferUseCase for TransferService<R> {
     ) -> Result<TransferRecordPage, AppError> {
         let page = page.unwrap_or(DEFAULT_PAGE);
         let size = size.unwrap_or(DEFAULT_SIZE);
-        if page == 0 {
-            return Err(AppError::bad_request("page 必须从 1 开始"));
+        if page == 0 || page > MAX_PAGE {
+            return Err(AppError::bad_request(format!(
+                "page must be between 1 and {MAX_PAGE}"
+            )));
         }
         if size == 0 || size > MAX_SIZE {
             return Err(AppError::bad_request(format!(
-                "size 必须在 1 到 {MAX_SIZE} 之间"
+                "size must be between 1 and {MAX_SIZE}"
             )));
         }
 
@@ -131,10 +144,10 @@ async fn transfer_in_transaction<R: TransferRepository>(
     let from_after = debit(&from, command.amount_cents)?;
     let to_after = credit(&to, command.amount_cents)?;
     repository
-        .update_account_balance(transaction, &from_after)
+        .update_account_balance(transaction, &from_after, from.version)
         .await?;
     repository
-        .update_account_balance(transaction, &to_after)
+        .update_account_balance(transaction, &to_after, to.version)
         .await?;
 
     let identity = RecordIdentity {
@@ -158,7 +171,7 @@ async fn transfer_in_transaction<R: TransferRepository>(
         audits.push(build_audit(
             &identity.record_id,
             audit_action::ROLLBACK_VERIFIED,
-            "调试开关触发：事务内写入将全部回滚",
+            "debug switch triggered: all writes in the transaction will be rolled back",
             identity.created_at,
         ));
     }
@@ -169,7 +182,7 @@ async fn transfer_in_transaction<R: TransferRepository>(
 
     if command.force_fail {
         return Err(AppError::internal(
-            "force_fail 已开启：事务内写入全部完成后主动失败",
+            "force_fail enabled: failing after all writes within the transaction",
         ));
     }
 
@@ -197,18 +210,22 @@ async fn require_account<R: TransferRepository>(
     repository
         .find_account(transaction, account_id)
         .await?
-        .ok_or_else(|| AppError::not_found(format!("账户 {account_id} 不存在")))
+        .ok_or_else(|| AppError::not_found(format!("account {account_id} does not exist")))
 }
 
 fn validate(command: &TransferCommand) -> Result<(), AppError> {
     if command.from_account_id.trim().is_empty() || command.to_account_id.trim().is_empty() {
-        return Err(AppError::bad_request("账户 ID 不能为空"));
+        return Err(AppError::bad_request("account ID must not be empty"));
     }
     if command.from_account_id == command.to_account_id {
-        return Err(AppError::bad_request("转出账户与转入账户不能相同"));
+        return Err(AppError::bad_request(
+            "from account and to account must not be the same",
+        ));
     }
     if command.amount_cents <= 0 {
-        return Err(AppError::bad_request("转账金额必须大于 0"));
+        return Err(AppError::bad_request(
+            "transfer amount must be greater than 0",
+        ));
     }
 
     Ok(())
@@ -221,7 +238,7 @@ fn debit(
 ) -> Result<TransferAccountState, AppError> {
     if account.balance_cents < amount_cents {
         return Err(AppError::bad_request(format!(
-            "账户 {} 余额不足：可用 {} 分，需要 {amount_cents} 分",
+            "account {} has insufficient balance: available {} cents, need {amount_cents} cents",
             account.id, account.balance_cents
         )));
     }
@@ -241,7 +258,9 @@ fn credit(
     let balance_cents = account
         .balance_cents
         .checked_add(amount_cents)
-        .ok_or_else(|| AppError::bad_request("转入后余额超出可表示范围"))?;
+        .ok_or_else(|| {
+            AppError::bad_request("balance after transfer exceeds the representable range")
+        })?;
 
     Ok(TransferAccountState {
         balance_cents,
@@ -299,7 +318,7 @@ fn balance_audits(
         build_audit(
             &identity.record_id,
             audit_action::RECORD_CREATED,
-            "转账流水写入完成",
+            "transfer record written",
             identity.created_at,
         ),
     ]
@@ -307,7 +326,7 @@ fn balance_audits(
 
 fn balance_detail(changes: &BalanceChanges<'_>) -> String {
     format!(
-        "{} 余额 {} -> {}，{} 余额 {} -> {}",
+        "{} balance {} -> {}, {} balance {} -> {}",
         changes.from_before.id,
         changes.from_before.balance_cents,
         changes.from_after.balance_cents,
@@ -345,7 +364,9 @@ mod tests {
             services::transaction::TransferUseCase,
         },
         entities::{transfer_account, transfer_record},
-        infrastructure::{databases::schema, repositories::transaction::SeaOrmTransferRepository},
+        infrastructure::{
+            databases::run_migrations, repositories::transaction::SeaOrmTransferRepository,
+        },
     };
     use sea_orm::EntityTrait;
     use std::sync::Arc;
@@ -363,16 +384,12 @@ mod tests {
                 .join(format!("axum-scaffold-transfer-test-{}.db", Uuid::now_v7()))
                 .display()
         );
-        let database = Database::connect(url).await.expect("连接临时数据库");
-        schema::create_transfer_tables(&database)
+        let database = Database::connect(url.clone())
             .await
-            .expect("建表成功");
-        schema::create_transfer_indexes(&database)
+            .expect("连接临时数据库");
+        run_migrations(&database, &url)
             .await
-            .expect("建索引成功");
-        schema::seed_transfer_accounts(&database)
-            .await
-            .expect("播种成功");
+            .expect("执行迁移与播种成功");
 
         let repository = Arc::new(SeaOrmTransferRepository);
         let service = TransferService::new(database.clone(), repository);
@@ -507,6 +524,45 @@ mod tests {
         assert_eq!(record_count(&database).await, 1);
     }
 
+    /// 并发扣减不会丢失更新，也不会把锁竞争暴露成数据库错误。
+    ///
+    /// alice 初始 100000，5 笔各 30000 同时发起：只可能有 3 笔成功，且失败的 2 笔必须是
+    /// 「余额不足」（读到已提交的余额）而非 `AppError::Database`。写事务以 BEGIN IMMEDIATE
+    /// 开启，写锁在事务开始时就取得，不会出现 DEFERRED 下「读后升级锁」的冲突窗口。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_transfers_serialize_without_losing_updates() {
+        let (service, database) = setup().await;
+        let service = Arc::new(service);
+
+        let mut handles = Vec::new();
+        for _ in 0..5 {
+            let service = Arc::clone(&service);
+            handles.push(tokio::spawn(async move {
+                service.transfer(command(ALICE, BOB, 30000)).await
+            }));
+        }
+
+        let mut outcomes = Vec::new();
+        for handle in handles {
+            outcomes.push(handle.await.expect("并发任务不应 panic"));
+        }
+
+        let committed = outcomes.iter().filter(|outcome| outcome.is_ok()).count();
+        let rejected = outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, Err(AppError::BadRequest(_))))
+            .count();
+        assert_eq!(committed, 3, "只有 3 笔能扣满 100000");
+        assert_eq!(
+            rejected, 2,
+            "其余请求应是余额不足而非数据库错误: {outcomes:?}"
+        );
+
+        assert_eq!(balance(&database, ALICE).await, 10000);
+        assert_eq!(balance(&database, BOB).await, 190000);
+        assert_eq!(record_count(&database).await, 3);
+    }
+
     #[tokio::test]
     async fn missing_account_is_reported_as_not_found() {
         let (service, database) = setup().await;
@@ -602,6 +658,13 @@ mod tests {
 
         assert!(matches!(
             service.list_transfers(Some(0), None).await,
+            Err(AppError::BadRequest(_))
+        ));
+        // 页码超过上限直接拒绝，避免 (page - 1) * size 在查询层溢出。
+        assert!(matches!(
+            service
+                .list_transfers(Some(super::MAX_PAGE + 1), None)
+                .await,
             Err(AppError::BadRequest(_))
         ));
         assert!(matches!(

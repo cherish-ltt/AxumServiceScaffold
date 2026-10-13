@@ -56,6 +56,7 @@ fn test_config(out_dir: &str) -> AppConfig {
             rate_limit_requests: 1000,
             rate_limit_period_secs: 1,
             hsts_enabled: false,
+            cors_allowed_origins: Vec::new(),
         },
     }
 }
@@ -86,7 +87,7 @@ fn file_logs_are_flushed_in_batches() {
 
     // 未满批次阈值：事件只进内存缓冲，不应落盘
     for i in 0..4 {
-        tracing::info!("批量日志第 {i} 条");
+        tracing::info!("batch log entry {i}");
     }
     assert_eq!(
         read_logs(&out_dir),
@@ -95,7 +96,7 @@ fn file_logs_are_flushed_in_batches() {
     );
 
     // 满 5 条：同步触发一次落盘
-    tracing::info!("批量日志第 5 条");
+    tracing::info!("batch log entry 5");
     assert_eq!(
         read_logs(&out_dir).lines().count(),
         5,
@@ -104,7 +105,7 @@ fn file_logs_are_flushed_in_batches() {
 
     // 继续写入，剩余 3 条在 guard drop 时落盘
     for i in 6..9 {
-        tracing::info!("批量日志第 {i} 条");
+        tracing::info!("batch log entry {i}");
     }
     drop(guard);
 

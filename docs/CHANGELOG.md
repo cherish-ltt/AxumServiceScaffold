@@ -5,6 +5,144 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.6.0] - 2026-10-13
+
+### 修复
+
+- **日志落盘的磁盘 IO 移出锁外**：`BatchFileWriter::flush` 原先在持有缓冲锁的情况下
+  `write_all` + `flush`，定时刷盘或满批落盘时所有写日志的线程会一起阻塞在磁盘 IO 上。
+  现改为先在锁内 `mem::take` 换出缓冲并重置计数，再释放锁写文件；写盘失败时把内容
+  放回缓冲队首，不丢日志。
+- **配置兜底值与 `.env-example` 对齐**：`LOG_OUT_DIR` 代码默认值由 `/var/log/axum-app`
+  改为 `./log`（不写环境变量时不再向系统目录写入，普通用户与容器内可直启动），
+  `DATABASE_IDLE_SECS` 由 `30` 改为 `60`；`tests/config_tests.rs` 断言与 `docs/LOGGING.md`
+  参数表同步。
+- **`DATABASE_URL` 显式限制为 SQLite**：迁移文件与 `schema.rs` 的补列/索引都是 SQLite 语法，
+  非 `sqlite:` 连接串会在启动时以难以定位的方式失败。现由 `AppConfig::from_env` 校验 scheme 并
+  报错退出（只输出 scheme，不回显完整连接串以免泄露口令）；`tests/config_tests.rs`
+  补 `postgres://` / `mysql://` / 裸路径三类用例，README 与 AGENTS.md 10.5 同步说明。
+- **`LOG_FILTER` 非法不再静默回退**：`logging::init` 原先用
+  `unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"))`，过滤规则写错时会静默换一套
+  级别运行（与“非法配置即拒绝启动”的约定相悖）。现改为 `with_context(...)?` 报错退出，
+  并把解析提前到创建文件句柄之前；`tests/logging_tests.rs` 补对应用例，`docs/LOGGING.md` 同步。
+- **分页边界与示例列表一致性**：仓储层 `list_records` 的偏移量改用
+  `page.checked_sub(1).and_then(|p| p.checked_mul(size))`，不再依赖「service 已保证 page >= 1」
+  （原式 `page - 1` 在 page 为 0 时 debug 下先 panic）；`examples` 列表补上 `page` 上限 10000，
+  与事务接口一致；`docs` 下 Example DTO 的 `schema(example=...)` 改为与真实响应文案大小写一致。
+- **409 响应泄露数据库内部结构**：`From<DbErr>` 原本把 `UniqueConstraintViolation` 的
+  原始 detail 直接当作文案返回，客户端会收到
+  `UNIQUE constraint failed: transfer_records.request_id`（表名 + 列名）。
+  现改为固定文案 `resource already exists` + 服务端 `debug` 日志，`AGENTS.md`
+  第 10.5 节同步约束。
+- **Clippy 阈值失效修正**：`.clippy.toml` 里的 `cognitive-complexity-threshold`、
+  `too-many-lines-threshold`、`allow-unwrap-in-tests` 此前从未生效（对应 lint 默认
+  `allow`，只写阈值不启用 lint 等于假配置）。现改为：在 `src/lib.rs` 显式启用
+  `clippy::cognitive_complexity` 与 `clippy::unwrap_used`，并拆分 `error.rs` 里的
+  `into_response` 使其低于复杂度阈值；移除不具备可行性的 `too-many-lines-threshold`。
+  `.clippy.toml` 与 `AGENTS.md` 第 5 节（以及 README / `docs/TESTING.md` 的检查命令）
+  统一说明实际生效范围与不启用的两个 lint。
+- **默认 feature 收紧与依赖清理**：`default` 由 `["preset", "http-client"]` 改为空，
+  预置库改为按需开启（`--features preset,http-client`）；移除未被引用的
+  `axum/multipart` feature、`mime` 依赖以及 `uuid` 的 `v4`/`serde` feature。
+  README、`docs/DEVELOPMENT.md`、`docs/TESTING.md` 同步说明。
+- **CORS 纳入中间件栈并改为可配置**：原先 `create_app` 直接挂 `CorsLayer::permissive()`，
+  既绕过「所有中间件集中在 `middleware/stack.rs`」的约定，又无条件放行任意来源。
+  现新增 `MIDDLEWARE_CORS_ALLOWED_ORIGINS` 白名单（逗号分隔），装配移到 `middleware/stack.rs`
+  作为栈的最内层；默认空名单 → 不下发任何 CORS 头，单值 `*` 仍可显式放行全部来源。
+  同步 `.env`、`.env-example`、`tests/config_tests.rs`、`tests/middleware_tests.rs`、`tests/api_tests.rs`
+  与 `docs/MIDDLEWARE.md`。
+- **SQLite 事务隔离级别失效**：转账事务原本以 `IsolationLevel::Serializable` 开启，
+  但 sea-orm 在 SQLite 上会**忽略隔离级别**（只打一条 warn），实际始终是 `BEGIN DEFERRED`，
+  既让文档承诺落空，又让每次转账都写一条误导性告警。现改用
+  `begin_with_options(sqlite_transaction_mode = IMMEDIATE)`，在 `BEGIN` 时就取得写锁，
+  消除 DEFERRED 下「读后升级写锁」的冲突窗口；`docs/TRANSACTION.md` 与 `AGENTS.md`
+  第 10.5 节同步说明「控制并发用事务模式而非隔离级别」。
+- **账户余额缺少乐观锁**：`update_account_balance` 原本用全字段 `ActiveModel::update()`，
+  `WHERE` 中不带 `version`，读改写期间余额被他人推进会**静默覆盖**（与 AGENTS.md 10.5 不符）。
+  现改为 `update_many` + `balance/version/updated_at` 表达式 + `WHERE id AND version = <读取时的值>`，
+  影响行数为 0 时返回 `409 Conflict`；仓储接口新增 `expected_version` 参数，
+  并在 `infrastructure/repositories/transaction.rs` 补单元测试。
+- **`--release --features docs` 构建断裂**：`docs` feature 与 `debug_assertions` 是两个
+  正交开关，`utoipa::path` 只为 debug 专用 handler 生成路由元数据，而
+  `src/docs.rs` 的 `OpenApi` 无条件引用 `dev_login` / `dev_transfer`，导致
+  release + docs 组合下 `__path_dev_login` / `__path_dev_transfer` 找不到而编译失败。
+  现拆出仅在 `debug_assertions` 下编译的 `DevApiDoc`，由 `merge_from` 合入主文档，
+  两个开关的四种组合都可编译；同时裁剪 release 下仅有 debug 用例使用的测试辅助函数。
+- **分页偏移溢出**（审查 BUG-1）：`list_transfers` 新增页码上限校验
+  （`page` 必须位于 1~10000，`MAX_PAGE`），查询层用 `checked_mul` 兜底防止
+  `(page - 1) * size` 在 `u64` 上溢出；`docs/TRANSACTION.md` 接口表同步标注分页范围。
+- **release 下接口测试级联失败**（审查 BUG-2）：`tests/api_tests.rs` 中依赖
+  dev-login / dev-transfer 调试路由的辅助函数与用例（共 17 处）补上
+  `#[cfg(debug_assertions)]`，release 构建不再因路由不存在而失败。
+- **审计日志排序不稳定**（审查 M-4）：`list_audits` 在 `created_at` 基础上追加
+  `id` 二级排序，同一事务内多条审计日志顺序固定。
+- **测试健壮性**（审查 M-2/M-3/M-5/M-6/M-7）：`config_tests.rs` 的 `with_env`
+  改用 `Drop` 守卫恢复环境变量（断言 panic 也会还原）；`api_tests.rs` 的
+  `read_json` 改 `expect`（不再吞解析错误）；`logging_tests.rs` 断言日志文件内容
+  而非仅存在；`logging_interval_tests.rs` 用轮询代替固定 `sleep`；
+  `middleware_log_tests.rs` 补充全局订阅者单进程约束注释。
+- **示例列表分页上限**（审查 M-10）：`examples` 列表的 `size` 上限 100，与事务接口一致。
+- **文档与元数据修正**（审查 M-1/M-8/M-9）：`MIDDLEWARE.md` 超时描述改为
+  「进入超时层后的处理耗时，外层排队不计入」；`logging.rs` 注释去重；
+  `Cargo.toml` 的 `repository` 修正为 `cherish-ltt/AxumServiceScaffold`。
+
+### 变更
+
+- **OpenAPI 文档改为 `docs` feature 门控**（审查 S-3）：`utoipa` / `utoipa-swagger-ui`
+  转为 optional 依赖，Swagger UI 与 `/api-doc/openapi.json` 仅在 `--features docs`
+  构建下挂载（`cargo run --features docs`），不进 default 与 release 编译；
+  controller / DTO 的 `utoipa` 注解统一改投 `feature = "docs"`，仅调试专用行为
+  （dev 路由、`force_fail` 字段）保留 `debug_assertions`。CI 的 clippy 与 test
+  步骤改用 `--features docs`。
+- **建表迁移到 `sqlx::migrate`**（审查 S-5）：`migrations/` 目录新增版本化迁移文件
+  （`0001_create_transfer_tables.sql`），`databases::run_migrations(database, url)`
+  以 `sqlx::migrate!` 执行并记录到 `_sqlx_migrations`，随后补齐老库缺列、建索引
+  并幂等播种；`schema.rs` 不再负责建表。
+- **默认日志文件数统一为 60**（审查 S-1）：`LOG_MAX_LOG_FILES` 代码兜底默认值
+  与 `.env-example` 一致，`docs/LOGGING.md` 参数表同步。
+- **依赖版本锁定收紧**（审查 S-2）：`tracing` 锁定到 `=0.1.44`、
+  `tracing-subscriber` 锁定到 `=0.3.23`。
+- **Swagger 示例值校正**（审查 S-4）：`system` 响应的 `version` 示例更新为 `0.5.0`
+  （与 `Cargo.toml` 同步），`database_status` 示例改为实际值 `not_checked`。
+- **移除未使用的环境变量**（审查 S-6）：删除 `.env` / `.env-example` 中未被代码读取的
+  `UPLOAD_IMAGE_MAX_BYTES`。
+- **运行时输出英文化**：日志消息、API `message` 与错误消息、中间件文案、OpenAPI
+  description / schema example、示例与种子数据改为英文（测试内 `expect`/`assert` 失败
+  消息与代码注释、`docs/`、SQL 注释保持中文）；`src/` 下 20 余个文件与 `tests/`
+  断言语义同步，对外消息结构不变。
+- **启动配置改为 ASCII 列表框**：`log_startup_config` 由六条结构化 `info!` 改为单条
+  多行手绘 ASCII 框（`+====+` 标题 + 六组 `key=value` 行），纯 ASCII 字符避免乱码，
+  键仍输出为 `key=value`（如 `batch_max_events=50`）以兼容既有断言；
+  `docs/LOGGING.md`「启动配置日志」同步。
+- **启动配置框首行换行**：框体前补一空行，使 `+====+` 与日志前缀分行打印，
+  避免标题与 INFO 行拼接破坏框结构。
+
+### 说明
+
+- 未知路由 404 仍返回 axum 内置纯文本（审查 S-7）：提取器错误与 404/405 不属于统一
+  响应结构，测试只锁定状态码契约，维持既有取舍。
+- 以下设计取舍经确认保持现状：`/system/health` 不查询数据库（`database_status` 固定
+  `not_checked`，由 `/system/ready` 负责真实探测）、调试专用 `force_fail` 语义、
+  `examples` 接口纯内存固定数据。
+
+### 文档
+
+- **过时描述修正**：`docs/DEVELOPMENT.md` 与 `docs/ARCHITECTURE.md` 仍写「在
+  `infrastructure/databases/schema.rs` 建表」，实际建表早已迁到 `migrations/`
+  （`schema.rs` 只做老库补列、补索引与幂等播种），已改为现状描述并补上
+  「只支持 SQLite」的说明；`docs/RESPONSE.md` 的 `timestamp` 由「毫秒级本地时间戳」
+  更正为「Unix epoch 毫秒（UTC 基准）」；README 的健康检查说明由「失败时不应继续接收
+  流量」改为如实描述（`/health` 恒 200、不查库，接流与否请看 `/ready`）。
+- README 重构为简洁门面文档：只保留项目简介、架构总览与流程图、已内置能力清单、
+  文档导航、快速开始、默认接口、贡献指南与许可证；中间件栈与配置、事务示例、
+  统一响应结构、日志、测试与构建检查、扩展开发等详情内容拆分到 `docs/` 下独立 md
+  文件并通过链接跳转（`docs/ARCHITECTURE.md`、`docs/MIDDLEWARE.md`、
+  `docs/TRANSACTION.md`、`docs/RESPONSE.md`、`docs/LOGGING.md`、`docs/TESTING.md`、
+  `docs/DEVELOPMENT.md`）。图片、流程图、logo 与架构动效仍保留在 README。
+- AGENTS.md 中引用 README 章节的规范同步改为指向 `docs/` 下对应文档
+  （10.4 统一响应结构 → `docs/RESPONSE.md`；10.6 中间件栈/配置 → `docs/MIDDLEWARE.md`；
+  10.7 日志分批落盘 → `docs/LOGGING.md`）。
+
 ## [0.5.0] - 2026-10-09
 
 ### 变更

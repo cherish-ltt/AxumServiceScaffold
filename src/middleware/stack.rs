@@ -16,6 +16,7 @@ use tower::{
 use tower_http::{
     LatencyUnit,
     compression::CompressionLayer,
+    cors::{AllowOrigin, Any, CorsLayer},
     limit::RequestBodyLimitLayer,
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     set_header::{HeaderMetadata, response::SetMultipleResponseHeadersLayer},
@@ -82,9 +83,41 @@ pub fn apply(app: Router, config: &MiddlewareConfig) -> Router {
             Duration::from_secs(config.request_timeout_secs),
         ))
         .layer(RequestBodyLimitLayer::new(config.max_body_bytes))
+        .layer(cors_layer(config))
         .service(app);
 
     Router::new().fallback_service(stack)
+}
+
+/// CORS 与其余中间件一起装配，不再由 controller 或 `create_app` 各自添加。
+///
+/// 默认（白名单为空）不下发任何跨域放行头；白名单含 `*` 时放行全部来源。
+fn cors_layer(config: &MiddlewareConfig) -> CorsLayer {
+    if config
+        .cors_allowed_origins
+        .iter()
+        .any(|origin| origin == "*")
+    {
+        return CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+    }
+
+    let allowed: Vec<HeaderValue> = config
+        .cors_allowed_origins
+        .iter()
+        .filter_map(|origin| HeaderValue::from_str(origin).ok())
+        .collect();
+
+    if allowed.is_empty() {
+        return CorsLayer::new();
+    }
+
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list(allowed))
+        .allow_methods(Any)
+        .allow_headers(Any)
 }
 
 fn request_id_header() -> HeaderName {
