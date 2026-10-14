@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [0.7.0] - 2026-10-14
+
+### 新增
+
+- **启动配置快照输出版本号**：`log_startup_config`（`src/logging.rs`）的 `application` 分组
+  在 `app_name` / `app_env` 之后增加 `version` 行，取值 `env!("CARGO_PKG_VERSION")`
+  （编译期取自 `Cargo.toml` 的 `version`），启动日志与日志文件都能看到本次运行的是哪个版本，
+  发版改 `Cargo.toml` 即自动生效，不需手工同步；`docs/LOGGING.md`「启动配置日志」同步说明，
+  `tests/logging_interval_tests.rs` 补对应用例（版本值用同一编译期来源比对）。
+
 ## [0.6.0] - 2026-10-13
 
 ### 修复
