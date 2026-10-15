@@ -132,3 +132,13 @@ itertools = { version = "=0.15.0", optional = true }
 # HTTP 服务与中间件测试工具
 http-body-util = "=0.1.5"
 tower = { version = "=0.5.3", features = ["util"] }
+
+# 开发（debug）构建显式落盘：完整调试信息（debug = 2）是每个测试二进制 200 MB+ 与
+# 链接耗时的主要来源，行号级信息已足够定位失败用例；依赖侧不带调试信息。
+# 放在仓库而非 ~/.cargo/config.toml，避免各机器 profile 不同导致 fingerprint 失效、
+# 依赖全量重编译。
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+debug = false
