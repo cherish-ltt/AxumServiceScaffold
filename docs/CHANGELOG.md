@@ -7,6 +7,8 @@
 
 ## [0.7.0] - 2026-10-14
 
+本版本包含两部分：启动配置快照输出版本号，以及针对生产级 HTTP 服务审计结果的加固——补齐连接层防护与真实可用的可观测性，加入生产环境误配置门禁与统一错误响应，并把日志从「过载时自我放大」改为可限速、可轮转。
+
 ### 新增
 
 - **启动配置快照输出版本号**：`log_startup_config`（`src/logging.rs`）的 `application` 分组
@@ -14,6 +16,115 @@
   （编译期取自 `Cargo.toml` 的 `version`），启动日志与日志文件都能看到本次运行的是哪个版本，
   发版改 `Cargo.toml` 即自动生效，不需手工同步；`docs/LOGGING.md`「启动配置日志」同步说明，
   `tests/logging_interval_tests.rs` 补对应用例（版本值用同一编译期来源比对）。
+- **连接层防护（自定义 accept 循环）**：`main.rs` 不再使用 `axum::serve`，改由
+  `src/server` 接管监听套接字与连接构建器。原因：`axum::serve` 从不设置 hyper 的 `Timer`，
+  导致 `header_read_timeout` 永不生效（慢速发头可无限占用连接），且无法限制请求头数量、
+  请求头缓冲大小与并发连接数。新增配置 `SERVER_MAX_CONNECTIONS`（并发 TCP 连接上限，
+  超限连接被立即关闭并计入 `connection_limit` 拒绝指标）、
+  `SERVER_HTTP1_HEADER_READ_TIMEOUT_SECS`（同时约束慢速发头与 keep-alive 空闲连接）、
+  `SERVER_HTTP1_MAX_HEADERS`（超限回 431）、`SERVER_HTTP1_MAX_BUF_SIZE`（不得小于
+  hyper 内部下限 8192）。`tests/server_tests.rs` 用**真实 TCP**覆盖慢速发头、空闲连接回收、
+  请求头超量、连接上限与许可回收。
+- **优雅关闭上限**：新增 `SHUTDOWN_TIMEOUT_SECS`。收到 SIGINT/SIGTERM 后停止 accept、
+  排空在途连接，超时强制中止并打 `warn`；该值必须小于编排层的终止宽限期
+  （见 `docs/DEPLOYMENT.md`）。`tests/server_tests.rs` 覆盖「在途请求被排空」与
+  「卡住的连接不拖住退出」两类场景。
+- **Prometheus 指标**：新增 `src/metrics.rs`（`metrics` + `metrics-exporter-prometheus`）
+  与 `GET /metrics` 采集端点，与业务接口**同端口**暴露、用 `Authorization: Bearer`
+  令牌鉴权（`METRICS_TOKEN`，不匹配时返回 404 以免暴露端点存在；`METRICS_ENABLED=false`
+  时完全不注册）。指标包括 `http_requests_total`、`http_request_duration_seconds`
+  （1ms~10s 分桶）、`http_requests_inflight`、`http_rejections_total{reason}`；
+  **标签只使用路由模板**（`MatchedPath`，未匹配路由统一为 `unmatched`），
+  请求 ID、查询串、路径参数都不进标签，避免基数爆炸。路由模板靠无状态且位于路由匹配之内的
+  `RouteSlot` 捕获层传递（`middleware::route_slot`），这是唯一允许走 `Router::layer` 的层。
+- **生产环境启动门禁**：`APP_ENV=production` 时，debug 构建或启用 `docs` feature 的构建
+  **默认拒绝启动**（调试登录接口可伪造任意身份），需显式设置
+  `APP_ALLOW_INSECURE_PRODUCTION=true`（此时调试与文档路由仍不注册）；
+  安全关键中间件不允许关闭，需显式设置 `MIDDLEWARE_ALLOW_INSECURE_PRODUCTION=true`；
+  `HTTP_ALLOWED_HOSTS` 必须非空且不含 `*`；`JWT_SECRET` 与 `METRICS_TOKEN` 不得为示例值。
+  `docs` 路由的挂载同时受 `cfg(feature = "docs")` 与运行期环境校验约束。
+- **Host 白名单**：`HTTP_ALLOWED_HOSTS` + `HostCheckLayer`。缺失 Host 返回 `400`，
+  不在白名单返回 `421`。条目不含端口时匹配任意端口，含端口时精确匹配，支持 `[::1]:8080`；
+  通配符 `*` 在启动阶段被拒绝。
+- **可信客户端 IP**：`MIDDLEWARE_TRUSTED_PROXIES` + `ClientIpLayer`。仅当直连对端落在
+  可信网段内时才采信 `X-Forwarded-For`，并按信任链**从右向左**取第一个不可信地址
+  （客户端伪造的最左项不会被采信），`X-Real-IP` 作为兜底；解析失败回退到直连地址。
+  访问日志同时记录 `client_ip` 与 `peer_ip` 以核对代理链路。
+- **URI 长度上限**：`MIDDLEWARE_MAX_URI_BYTES`（默认 8 KiB）+ `UriLimitLayer`，超限返回 `414`。
+- **排队等待上限**：`MIDDLEWARE_QUEUE_WAIT_TIMEOUT_SECS`（默认 5s）。拿到背压队列名额后等待
+  并发许可的时间上限，超时返回 `503{reason="queue_wait_timeout"}`，避免请求挂到外层总超时
+  （那样会变成 `408`，对调用方含义不同）。
+- **中间件开关**：`MIDDLEWARE_*_ENABLED` 逐个控制层是否装配，关闭某一层不影响其余层顺序。
+- **`Cache-Control: no-store`**：安全响应头默认追加，业务响应不再可被中间代理缓存。
+- **HSTS 可配置**：`MIDDLEWARE_HSTS_MAX_AGE_SECS` / `MIDDLEWARE_HSTS_INCLUDE_SUBDOMAINS` /
+  `MIDDLEWARE_HSTS_PRELOAD`（`preload` 要求同时开启 `includeSubDomains` 且
+  `max-age >= 31536000`，否则拒绝启动）。
+- **数据库池取连接超时**：`DATABASE_ACQUIRE_TIMEOUT_SECS`（默认 3s）；
+  就绪探测超时由硬编码 2s 改为可配的 `DATABASE_READY_PROBE_TIMEOUT_SECS`。
+- **JSON 日志**：`LOG_FORMAT=JSON` 输出单行 JSON（事件字段平铺，span 字段在 `span` 对象内），
+  便于容器与日志系统按字段检索。控制台层同样遵循该配置，并在 JSON 模式下关闭 ANSI 着色。
+- **日志容量控制**：`LOG_MAX_FILE_BYTES`（单文件大小上限，默认 64 MiB）与
+  `LOG_MAX_EVENTS_PER_SEC`（每秒落盘条数上限，超出丢弃并写一条汇总行，`0` 表示不限速）。
+- **部署文档与代理片段**：新增 `docs/DEPLOYMENT.md` 与
+  `deploy/nginx/axum-service-scaffold.conf`，明确 TLS/HTTP2/按 IP 限流属于代理责任、
+  代理与应用数值对齐关系（`client_header_timeout` 与 `keepalive_timeout` 必须小于
+  `SERVER_HTTP1_HEADER_READ_TIMEOUT_SECS` 等）与抓取 `/metrics` 的注意事项。
+- **CI 产物门禁**：release 二进制不得包含 `/api-doc/openapi.json`、`swagger-ui`、
+  `dev-login`、`dev-transfer` 字符串，并新增 release 下的 `artifact_tests` 与
+  `cargo test --release --features docs` 两个步骤。
+
+### 修复
+
+- **`429`/`503` 批量拒绝不再逐条告警**：原先 `DefaultOnFailure` 以 `ERROR` 级别记录每次背压/
+  限流拒绝，压测中出现「15 秒 46 万条 ERROR」。现由 `ObservabilityLayer` 统一记录访问日志：
+  限流与背压/排队超时降为 `DEBUG`（默认 `LOG_FILTER=info` 下不输出），其余 4xx 为 `WARN`，
+  真正的 5xx 仍为 `ERROR`；拒绝次数由 `http_rejections_total` 统计。
+  `tests/middleware_log_level_tests.rs` 锁定该策略。
+- **框架层拒绝响应体统一**：`tower-http` 的超时返回**空体** `408`、请求体超限返回纯文本
+  `length limit exceeded` 的 `413`，与统一响应结构不一致。新增 `RejectionBodyLayer`
+  把非 JSON 的 4xx/5xx 改写为 `ApiResponse`；同时让压缩层跳过错误响应
+  （`tower-http` 的 `Timeout` 会保留既有的 `content-encoding`，改写前必须保证错误响应未被压缩）。
+- **调试路由不再只靠编译期隔离**：`dev-login` / `dev-transfer` 原先仅由
+  `#[cfg(debug_assertions)]` 门控，用 debug 构建部署到生产就是完整鉴权绕过。现改为
+  「编译期 cfg」+「运行期非生产环境」双重门控（`api::debug_routes_enabled`）。
+- **`Router::layer` 不再用于有状态中间件**：并发门与限流保留在 `ServiceBuilder` 包住整个
+  Router 的栈里，避免「每路由一份额度」放大全局语义；`ConcurrencyGateLayer` 的开关与
+  排队超时在 `call` 内先取许可、调用前显式 `ready()`（`poll_ready` 恒为就绪，否则等待会跑到
+  栈外而失去等待上限；内层 `Buffer` 未 `poll_reserve` 直接调用会 panic）。
+- **`Host` 头在无白名单时不参与路由**：解析入口统一为
+  `client_ip::request_authority`（先 URI authority 再 `Host`），HTTP/1.1 与 absolute-form 行为一致。
+- **日志不再可能在退出时丢失**：文件写入器由自建 `LogFileWriter` 实现（时间轮转 + 单文件大小
+  上限 + 文件数量保留），`BatchGuard` 在 drop 时停止刷盘线程并落盘剩余缓冲；
+  轮转失败不阻断写入（否则会重复写入同一批内容），失败原因在锁外上报一条 `error`。
+- **JSON 日志的 span 字段缓存污染**：控制台层与文件层原先共用字段格式化器的 span 缓存，
+  带 ANSI 的文本被 JSON 格式化器当作 JSON 解析而 panic。现两层各持一份缓存
+  （`LogFields<Marker>`），并保证字段格式化器与事件格式化器（Text/Json）配套。
+- **请求取消不再污染指标**：请求在应答前被丢弃（连接中断/进程关闭）时只记
+  `http_rejections_total{reason="cancelled"}`，不再以 `status=0` 计入请求总数与延迟直方图。
+
+### 变更
+
+- **配置模块拆分**：`src/infrastructure/config.rs` 拆为
+  `config/{env,server,database,jwt,logging,middleware,metrics}.rs`，
+  顶层 `AppConfig` 保留组合与跨分节校验。
+- **日志模块拆分**：`src/logging.rs` 拆为 `logging/{mod,file_writer,format,batch}.rs`；
+  **移除 `tracing-appender` 依赖**（0.2.5 只有时间轮转与文件数量保留，没有单文件大小上限），
+  改用 `std::thread` + `std::sync::mpsc` 自行实现定时刷盘。
+- **新增依赖**：`hyper`（`http1`、`server`）、`hyper-util`（`server-auto`、`server-graceful`、
+  `service`、`tokio`）、`metrics`、`metrics-exporter-prometheus`；`tower` 增加 `util` feature，
+  `tracing-subscriber` 增加 `json` feature。`hyper` / `hyper-util` 版本与 axum 传递依赖一致，
+  不引入第二套 HTTP 栈，也**不启用 `http2`**（应用只提供 HTTP/1.1 回源）。
+- **新增模块**：`src/server/{mod,connection,connections,shutdown}.rs`、`src/metrics.rs`、
+  `src/middleware/{client_ip,host,limits,concurrency,observability,rejection,route_slot,payload,body,error_layer,error_response}.rs`、
+  `src/api/fallbacks.rs`、`src/api/controllers/metrics_controller.rs`。
+- **`.env-example` 重写**：按「应用 / 连接层 / 数据库 / JWT / 日志 / 中间件 / 指标」分组，
+  补齐全部新参数与注释；`tests/config_tests.rs` 同步覆盖默认值、覆盖项与校验分支
+  （38 个用例），`tests/common/mod.rs` 集中构造测试配置，避免新增字段时多处漂移。
+- **文档**：新增 `docs/DEPLOYMENT.md`，重写 `docs/MIDDLEWARE.md`（层序、开关语义、
+  拒绝原因与 PromQL、按 IP 限流与长连接的现状与扩展点）、`docs/LOGGING.md`（格式、容量、等级策略）、
+  `docs/RESPONSE.md`（框架级错误与统一结构、`431` 等例外）。
+- **`404` / `405` 统一响应体**：`fallback` 与 `method_not_allowed_fallback` 复用
+  `ApiResponse`（`Route not found` / `Method not allowed`，`405` 保留 `Allow` 头）。
 
 ## [0.6.0] - 2026-10-13
 

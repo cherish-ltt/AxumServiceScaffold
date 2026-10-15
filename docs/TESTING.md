@@ -13,6 +13,9 @@ cargo check --all-targets
 cargo check --release
 cargo check --release --features docs
 cargo test --features docs
+cargo test --release --features docs
+# 产物门禁：release 二进制不得包含调试/文档路由字符串（CI 同款）
+strings -a target/release/axum-service-scaffold | grep -E "swagger-ui|/api-doc/openapi.json|dev-login|dev-transfer"
 ```
 
 （CI 同款命令见 `.github/workflows/rust-ci.yml`；`default` feature 为空，
@@ -35,6 +38,24 @@ cargo test --features docs
 回滚这类“写了一半”的行为应当有测试兜底：可参考
 `services/transaction.rs` 的单测（在事务内主动失败后断言数据库无残留）与
 `tests/api_tests.rs` 中的 `transfer_rolls_back_every_write_when_force_fail_is_on`。
+
+## 测试文件分工
+
+| 文件 | 覆盖内容 |
+| --- | --- |
+| `src/**`（`#[cfg(test)]`） | 纯函数与局部逻辑：配置解析与校验、密码哈希、CIDR/HSTS/Host 匹配、限流窗口、令牌定长比较等 |
+| `tests/api_tests.rs` | HTTP 接口层黑盒测试（`oneshot`）：状态码、统一响应结构、鉴权、CORS、404/405、URI 超长、Host 白名单、`Cache-Control`、HSTS 组合 |
+| `tests/middleware_tests.rs` | 中间件栈：超时、Body 超限、限流、背压、排队等待超时、框架拒绝响应体、开关生效、压缩、CORS |
+| `tests/server_tests.rs` | **真实 TCP** 连接层：慢速发头超时、空闲连接回收、请求头超量（431）、连接数上限与许可回收、优雅关闭与关闭上限 |
+| `tests/config_tests.rs` | `AppConfig::from_env` 的默认值、覆盖项与全部校验分支（含生产环境门禁） |
+| `tests/metrics_tests.rs` | 指标端点鉴权与内容、路由模板标签、拒绝原因标签（独占进程：全局 recorder） |
+| `tests/artifact_tests.rs` | 产物暴露门禁：生产配置、release 构建、`docs` feature 组合下调试/文档路由均不可达 |
+| `tests/client_ip_tests.rs` | 可信代理链下的真实客户端 IP 解析（真实 TCP + 真实日志，独占进程） |
+| `tests/logging_*_tests.rs` | 日志：初始化校验、分批落盘、定时落盘、单文件大小轮转与保留、JSON 可解析与脱敏、`429/503` 等级策略 |
+
+**独占进程的原因**：`tracing` 的全局订阅者、callsite interest 缓存与 `metrics` 的全局 recorder
+都是进程级状态，安装一次后无法替换。需要断言日志内容或指标内容的测试必须各占一个测试二进制文件
+（Cargo 的 `tests/*.rs` 天然各是一个进程），否则会出现「某些用例单独跑通过、一起跑失败」。
 
 ## HTTP 黑盒测试（`oneshot`）
 

@@ -43,18 +43,28 @@ clone 下来即可跑通。
 
 - **洋葱架构骨架**：四层加装配层，参考实现可直接照抄扩展
 - **统一响应结构**：`{code, message, data?, timestamp}`，见 [统一响应结构](docs/RESPONSE.md)
-- **生产可用的中间件栈**：请求 ID / Trace / 安全响应头 / CORS 白名单 / 背压 / 限流 / 超时 / Body 限制 / 压缩，
-  参数集中在 `.env`，见 [中间件栈与配置](docs/MIDDLEWARE.md)
+- **生产可用的中间件栈**：请求 ID / 访问日志 / 安全响应头（含 `Cache-Control: no-store`）/
+  Host 白名单 / CORS 白名单 / 可信客户端 IP / URI 与 Body 限制 / 背压 / 限流 / 超时 / 压缩，
+  每一层都可单独开关，生产能力参数集中在 `.env`，见 [中间件栈与配置](docs/MIDDLEWARE.md)
+- **连接层防护**：请求头读取超时（同时回收空闲连接）、请求头数量与缓冲上限、
+  并发 TCP 连接上限、优雅关闭上限，不依赖反向代理即可生效，见 [部署与运维](docs/DEPLOYMENT.md)
+- **可观测性**：Prometheus 指标（`/metrics`，令牌鉴权、按路由模板聚合、拒绝原因分布）
+  与结构化访问日志（可切 JSON），见 [日志](docs/LOGGING.md)
+- **生产环境启动门禁**：生产环境误用 debug 构建或 `docs` feature、关闭安全关键中间件、
+  缺少 Host 白名单、使用示例密钥都会**拒绝启动**
 - **事务示例**：一次转账完整演示「启动事务 → 读写数据 → 提交 / 回滚」，见 [事务示例](docs/TRANSACTION.md)
-- **JWT 鉴权**：调试登录与当前用户解析，OpenAPI 文档与 Swagger UI 由 `docs` feature 提供（不进 release）
-- **日志**：按天滚动文件日志 + 分批落盘 + 启动配置快照，见 [日志](docs/LOGGING.md)
+- **JWT 鉴权**：调试登录与当前用户解析；调试路由与文档路由受「编译期 `cfg` + 运行期环境」
+  双重门控——OpenAPI 文档与 Swagger UI 由 `docs` feature 提供（不进 release）
+- **日志**：时间轮转 + 单文件大小上限 + 文件数量保留 + 分批落盘 + 每秒条数上限 + 启动配置快照，
+  支持文本与 JSON 两种格式，见 [日志](docs/LOGGING.md)
 - **SeaORM**：连接池、连通性检查、幂等建表与种子数据、仓储适配器
 - **克隆即可运行**：数据库文件不入库，首次启动自动完成建表与播种
 
 ## 文档导航
 
 - [架构设计](docs/ARCHITECTURE.md)：洋葱架构、目录结构、每层职责
-- [中间件栈与配置](docs/MIDDLEWARE.md)：执行顺序、容量参数、压测调参
+- [中间件栈与配置](docs/MIDDLEWARE.md)：执行顺序、开关语义、容量参数、拒绝原因与 PromQL、压测调参
+- [部署与运维](docs/DEPLOYMENT.md)：连接层防护、代理数值对齐、优雅关闭、指标抓取、生产启动校验
 - [事务示例](docs/TRANSACTION.md)：转账参考实现、回滚与幂等验证
 - [统一响应结构](docs/RESPONSE.md)：响应体约定
 - [日志](docs/LOGGING.md)：分批落盘、启动配置日志
@@ -99,7 +109,17 @@ cargo run
 
 默认监听 `http://127.0.0.1:8080`，启用 `docs` feature 的构建（开发时 `cargo run --features docs`）可访问
 `http://127.0.0.1:8080/swagger-ui` 与 `http://127.0.0.1:8080/api-doc/openapi.json`。服务收到 Ctrl-C 或 SIGTERM
-后会停止接收新请求并优雅关闭。
+后会停止接收新请求，并在 `SHUTDOWN_TIMEOUT_SECS` 内排空在途连接后退出。
+
+指标端点需要令牌（`METRICS_TOKEN`）：
+
+```bash
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://127.0.0.1:8080/metrics
+```
+
+**生产环境请用 `cargo build --release` 构建，不要加 `--features docs`**：
+`APP_ENV=production` 下，debug 构建或启用 `docs` feature 的构建会拒绝启动
+（详见 [部署与运维](docs/DEPLOYMENT.md#生产环境启动校验)）。
 
 健康检查语义：
 
@@ -108,12 +128,14 @@ cargo run
   编排系统应当用 `/ready` 决定是否接入流量。
 - `/api/v1/system/ready`：数据库就绪检查，数据库不可用时返回 `503 Service Unavailable`。
 
-> 开发登录接口（`POST /api/v1/auth/dev-login`）仅在 debug 构建提供，release 构建不存在该入口；
-> 不要在生产环境使用 `.env-example` 中的示例 JWT 密钥。
+> 开发登录接口（`POST /api/v1/auth/dev-login`）仅在 debug 构建且非生产环境提供，
+> release 构建或 `APP_ENV=production` 下该路由都不会注册；不要在生产环境使用
+> `.env-example` 中的示例 JWT 密钥与指标令牌。
 
 ## 默认接口
 
 - `GET /`
+- `GET /metrics`（令牌鉴权，`METRICS_ENABLED=false` 时不注册）
 - `GET /api/v1/system/health`
 - `GET /api/v1/system/ready`
 - `POST /api/v1/auth/dev-login`（仅调试构建）
@@ -149,6 +171,7 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --features docs -- -D warnings
 cargo build
 cargo test --features docs
+cargo test --release --features docs
 ```
 
 单元测试覆盖率使用 `cargo llvm-cov` 检测，要求不低于 80%。
