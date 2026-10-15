@@ -15,6 +15,7 @@ use crate::{
         repositories::transaction::SeaOrmTransferRepository,
         services::jwt::JwtService,
     },
+    metrics::MetricsHandle,
     services::{
         auth::AuthService, example::ExampleService, system::SystemService,
         transaction::TransferService,
@@ -24,6 +25,8 @@ use crate::{
 pub struct Container {
     pub config: Arc<AppConfig>,
     pub database: DatabaseConnection,
+    /// 指标出口句柄；`METRICS_ENABLED=false` 时为 `None`，此时 `/metrics` 不挂载。
+    pub metrics: Option<MetricsHandle>,
     pub auth_service: Arc<dyn AuthUseCase>,
     pub example_service: Arc<dyn ExampleUseCase>,
     pub system_service: Arc<dyn SystemUseCase>,
@@ -33,6 +36,7 @@ pub struct Container {
 impl Container {
     pub async fn bootstrap(config: AppConfig) -> Result<Self> {
         let config = Arc::new(config);
+        let metrics = MetricsHandle::install(&config.metrics)?;
         let database = connect_database(&config.database).await?;
         run_migrations(&database, &config.database.url).await?;
         let jwt_service = Arc::new(JwtService::new(config.jwt.clone())?);
@@ -49,6 +53,7 @@ impl Container {
         Ok(Self {
             config,
             database,
+            metrics,
             auth_service,
             example_service,
             system_service,

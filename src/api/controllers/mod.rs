@@ -1,4 +1,5 @@
 pub mod auth_controller;
 pub mod example_controller;
+pub mod metrics_controller;
 pub mod system_controller;
 pub mod transaction_controller;
