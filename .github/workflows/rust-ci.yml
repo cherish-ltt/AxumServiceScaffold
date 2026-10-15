@@ -65,3 +65,41 @@ jobs:
 
       - name: Run tests
         run: cargo test --features docs --verbose
+
+      # 真实二进制的门禁验证：debug 构建 + APP_ENV=production 必须拒绝启动
+      - name: Verify production refuses a debug build
+        run: |
+          set -euo pipefail
+          if APP_ENV=production HTTP_ALLOWED_HOSTS=api.example.com \
+             JWT_SECRET=ci-secret-that-is-long-enough-for-validation \
+             METRICS_TOKEN=ci-metrics-token-0123456789 \
+             ./target/debug/axum-service-scaffold 2>"$RUNNER_TEMP/production-gate.log"; then
+            echo "::error::production with a debug build must refuse to start"
+            exit 1
+          fi
+          grep -q "refusing to start" "$RUNNER_TEMP/production-gate.log"
+          echo "production gate verified"
+
+      # 产物层面的门禁：release 二进制里不得存在调试路由与文档路由的字符串。
+      # 编译期 cfg 与运行期 APP_ENV 两道门都靠它兜底（任一处回归都会在这里失败）。
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Verify the release artifact exposes no debug or docs endpoints
+        run: |
+          set -euo pipefail
+          binary=target/release/axum-service-scaffold
+          for needle in "/api-doc/openapi.json" "swagger-ui" "dev-login" "dev-transfer"; do
+            if strings -a "$binary" | grep -q -- "$needle"; then
+              echo "::error::release artifact must not contain '$needle'"
+              exit 1
+            fi
+          done
+          echo "release artifact contains no debug or docs endpoints"
+
+      # 只有 release 构建才会编译 artifact_tests 里的产物断言（debug 下它们被 cfg 裁掉）
+      - name: Run release artifact tests
+        run: cargo test --release --test artifact_tests --verbose
+
+      - name: Run release tests with the docs feature
+        run: cargo test --release --features docs --verbose
