@@ -58,10 +58,14 @@ jobs:
         run: cargo clippy --all-targets --features docs -- -D warnings
 
       - name: Check release + docs combination
-        run: cargo check --release --features docs
+        # 用 build 而非 check：check 只产出 metadata，后续的 release 测试无法复用，
+        # 会让 release 依赖被完整编译两遍。
+        run: cargo build --release --features docs
 
       - name: Build the project
-        run: cargo build --verbose
+        # 与下一条 `cargo test --features docs` 共用同一套 feature 集合，
+        # 避免 dev 依赖被按两种组合各编译一遍。
+        run: cargo build --features docs --verbose
 
       - name: Run tests
         run: cargo test --features docs --verbose
