@@ -38,7 +38,16 @@ thiserror = "=2.0.21"
 
 # Web 框架与 HTTP 中间件
 axum = "=0.8.9"
-tower = { version = "=0.5.3", features = ["buffer", "limit", "load-shed"] }
+# 连接层：自定义 accept 循环需要直接驱动 hyper 连接构建器，
+# 版本与 axum 传递依赖一致（Cargo.lock 中已锁定同版本），避免重复编译。
+hyper = { version = "=1.9.0", features = ["http1", "server"] }
+hyper-util = { version = "=0.1.20", features = [
+  "server-auto",
+  "server-graceful",
+  "service",
+  "tokio",
+] }
+tower = { version = "=0.5.3", features = ["buffer", "limit", "load-shed", "util"] }
 tower-http = { version = "=0.7.1", features = [
   "compression-gzip",
   "cors",
@@ -85,15 +94,20 @@ argon2 = "=0.6.0"
 jsonwebtoken = { version = "=11", features = ["aws_lc_rs"] }
 
 # 可观测性
+# 日志轮转/容量控制由本仓库实现（见 src/logging/file_writer.rs）：
+# tracing-appender 0.2.5 只有时间轮转与文件数量保留，没有单文件大小上限。
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", features = [
   "env-filter",
   "fmt",
+  "json",
   "time",
   "local-time",
 ] }
-tracing-appender = "=0.2.5"
 time = { version = "=0.3.55", features = ["macros"] }
+# Prometheus 指标出口：metrics 负责采集 API，exporter 负责文本暴露格式
+metrics = "=0.24.6"
+metrics-exporter-prometheus = { version = "=0.18.3", default-features = false }
 
 # OpenAPI 与调试文档（需要时通过 --features docs 启用）
 utoipa = { version = "=6.0.0", optional = true }
