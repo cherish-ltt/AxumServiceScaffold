@@ -18,11 +18,21 @@ use crate::{
 #[cfg(feature = "docs")]
 use crate::docs::{DocAccessTokenResponse, DocCurrentUserResponse, DocErrorResponse};
 
-pub fn router() -> Router<Arc<Container>> {
+/// 认证路由。
+///
+/// `debug_routes` 仅在 debug 构建下有意义：release 产物中 dev-login 分支不参与编译。
+pub fn router(debug_routes: bool) -> Router<Arc<Container>> {
     let router = Router::new().route("/auth/me", get(me));
 
     #[cfg(debug_assertions)]
-    let router = router.route("/auth/dev-login", post(dev_login));
+    let router = if debug_routes {
+        router.route("/auth/dev-login", post(dev_login))
+    } else {
+        router
+    };
+
+    #[cfg(not(debug_assertions))]
+    let _ = debug_routes;
 
     router
 }

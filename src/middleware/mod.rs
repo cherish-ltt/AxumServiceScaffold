@@ -1,9 +1,14 @@
-//! HTTP 中间件装配。
-//!
-//! 所有中间件由 [`apply`] 用 `tower::ServiceBuilder` 统一组织，容量参数来自
-//! [`crate::infrastructure::config::MiddlewareConfig`]，这里不出现任何业务逻辑。
-
-mod error_response;
+pub mod body;
+pub mod client_ip;
+pub mod concurrency;
+pub mod error_layer;
+pub mod error_response;
+pub mod host;
+pub mod limits;
+pub mod observability;
+pub mod payload;
+pub mod rejection;
+pub mod route_slot;
 mod stack;
 
 pub use stack::apply;

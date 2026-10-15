@@ -28,13 +28,23 @@ use crate::docs::{DocErrorResponse, DocTransferDetailResponse, DocTransferListRe
 #[cfg(all(feature = "docs", debug_assertions))]
 use crate::docs::DocTransferReceiptResponse;
 
-pub fn router() -> Router<Arc<Container>> {
+/// 事务路由。
+///
+/// `debug_routes` 仅在 debug 构建下有意义：release 产物中 dev-transfer 分支不参与编译。
+pub fn router(debug_routes: bool) -> Router<Arc<Container>> {
     let router = Router::new()
         .route("/transactions", get(list_transfers))
         .route("/transactions/{id}", get(get_transfer));
 
     #[cfg(debug_assertions)]
-    let router = router.route("/transactions/dev-transfer", post(dev_transfer));
+    let router = if debug_routes {
+        router.route("/transactions/dev-transfer", post(dev_transfer))
+    } else {
+        router
+    };
+
+    #[cfg(not(debug_assertions))]
+    let _ = debug_routes;
 
     router
 }
