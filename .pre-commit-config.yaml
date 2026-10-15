@@ -94,9 +94,12 @@ repos:
         pass_filenames: false
 
       # cargo check：编译检查，不生成最终二进制
+      # feature 集合与 CI、AGENTS 第 2/5 节保持一致（--features docs）。
+      # 与 --all-features 交替执行会让依赖树反复全量重编译（aws-lc-sys / libsqlite3-sys /
+      # ring 等 C 依赖会被重复构建多次）。
       - id: cargo-check
         name: cargo check 编译检查
-        entry: cargo check --all-targets --all-features
+        entry: cargo check --all-targets --features docs
         language: system
         types: [rust]
         pass_filenames: false
@@ -104,17 +107,26 @@ repos:
       # clippy 静态分析：-D warnings 表示将警告视为错误
       - id: clippy
         name: clippy 静态分析
-        entry: cargo clippy --all-targets --all-features -- -D warnings
+        entry: cargo clippy --all-targets --features docs -- -D warnings
         language: system
         types: [rust]
         pass_filenames: false
 
       # cargo test：运行测试，默认在 pre-commit 阶段执行
-      # 如果测试较慢，可取消注释下一行将其移到 pre-push 阶段
       - id: test
         name: cargo test 测试
-        entry: cargo test --all-targets --all-features
+        entry: cargo test --all-targets --features docs
         language: system
         types: [rust]
         pass_filenames: false
-        # stages: [pre-push]  # 如需移至推送前执行，取消注释此行
+
+      # 可选依赖 bundle 的兜底编译，只在推送前跑一次。
+      # preset / http-client 不在 default 中，本地日常并不编译它们；
+      # 放在 pre-commit 会让每次提交都换一套 feature 集合重编译依赖树。
+      - id: cargo-check-optional-bundles
+        name: cargo check 可选依赖 bundle 兜底
+        entry: cargo check --all-targets --all-features
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [pre-push]
