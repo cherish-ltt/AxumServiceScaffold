@@ -1,29 +1,28 @@
 use std::time::{Duration, Instant};
 
+mod common;
+
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
     routing::{get, post},
 };
-use axum_service_scaffold::{infrastructure::config::MiddlewareConfig, middleware};
+use axum_service_scaffold::{infrastructure::config::AppConfig, middleware};
+use http_body_util::BodyExt;
+use serde_json::Value;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-fn base_config() -> MiddlewareConfig {
-    MiddlewareConfig {
-        request_timeout_secs: 10,
-        max_body_bytes: 2 * 1024 * 1024,
-        max_concurrency: 256,
-        backpressure_queue: 256,
-        rate_limit_requests: 1000,
-        rate_limit_period_secs: 1,
-        hsts_enabled: false,
-        cors_allowed_origins: vec!["https://example.com".to_string()],
-    }
+fn base_config() -> AppConfig {
+    let mut config = common::app_config(&std::env::temp_dir().to_string_lossy());
+    config.middleware.rate_limit_requests = 1000;
+    config.middleware.cors_allowed_origins = vec!["https://example.com".to_string()];
+
+    config
 }
 
-fn ping_app(config: &MiddlewareConfig) -> Router {
+fn ping_app(config: &AppConfig) -> Router {
     middleware::apply(
         Router::new().route("/ping", get(|| async { "pong" })),
         config,
@@ -54,7 +53,7 @@ async fn hold_handler() -> &'static str {
 #[tokio::test]
 async fn request_over_timeout_is_rejected_with_408() {
     let mut config = base_config();
-    config.request_timeout_secs = 1;
+    config.middleware.request_timeout_secs = 1;
 
     let app = middleware::apply(Router::new().route("/slow", get(slow_handler)), &config);
 
@@ -72,7 +71,7 @@ async fn request_over_timeout_is_rejected_with_408() {
 #[tokio::test]
 async fn oversized_body_is_rejected_with_413() {
     let mut config = base_config();
-    config.max_body_bytes = 1024;
+    config.middleware.max_body_bytes = 1024;
 
     let app = middleware::apply(
         Router::new().route(
@@ -103,8 +102,8 @@ async fn oversized_body_is_rejected_with_413() {
 #[tokio::test]
 async fn requests_over_the_rate_limit_are_rejected_with_429() {
     let mut config = base_config();
-    config.rate_limit_requests = 2;
-    config.rate_limit_period_secs = 60;
+    config.middleware.rate_limit_requests = 2;
+    config.middleware.rate_limit_period_secs = 60;
 
     let app = ping_app(&config);
 
@@ -127,8 +126,8 @@ async fn requests_over_the_rate_limit_are_rejected_with_429() {
 #[tokio::test]
 async fn concurrency_overload_is_shed_with_503() {
     let mut config = base_config();
-    config.max_concurrency = 1;
-    config.backpressure_queue = 1;
+    config.middleware.max_concurrency = 1;
+    config.middleware.backpressure_queue = 1;
 
     let app = middleware::apply(Router::new().route("/hold", get(hold_handler)), &config);
 
@@ -213,7 +212,7 @@ async fn security_headers_follow_config() {
     );
 
     let mut config = base_config();
-    config.hsts_enabled = true;
+    config.middleware.hsts.enabled = true;
     let response = send(ping_app(&config), get_request("/ping")).await;
     assert!(
         response
@@ -272,6 +271,102 @@ async fn cors_layer_follows_allowed_origins_config() {
     );
 }
 
+/// 拿到背压队列名额后仍在等待并发许可：超过等待上限必须 503，而不是无限等待，
+/// 也不是被外层总超时兜成 408（两者对调用方的含义不同）。
+#[tokio::test]
+async fn queue_wait_timeout_is_rejected_with_503() {
+    let mut config = base_config();
+    config.middleware.max_concurrency = 1;
+    config.middleware.backpressure_queue = 8;
+    config.middleware.queue_wait_timeout_secs = 1;
+    config.middleware.request_timeout_secs = 10;
+
+    async fn holding_handler() -> &'static str {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        "held"
+    }
+
+    let app = middleware::apply(Router::new().route("/hold", get(holding_handler)), &config);
+    let first = tokio::spawn({
+        let app = app.clone();
+        async move { send(app, get_request("/hold")).await.status() }
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let started = Instant::now();
+    let second = send(app, get_request("/hold")).await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(second.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(
+        elapsed >= Duration::from_millis(900) && elapsed < Duration::from_secs(3),
+        "应在排队等待上限附近拒绝，实际耗时 {elapsed:?}"
+    );
+    let status = tokio::time::timeout(Duration::from_secs(3), first)
+        .await
+        .expect("占住并发名额的请求应正常完成")
+        .expect("请求任务不应 panic");
+    assert_eq!(status, StatusCode::OK);
+}
+
+/// 关闭安全关键中间件时必须真的不生效（生产环境默认拒绝这种配置，见 config_tests）。
+#[tokio::test]
+async fn disabled_switches_remove_their_layers() {
+    let mut config = base_config();
+    config.middleware.switches.security_headers = false;
+    config.middleware.switches.timeout = false;
+    config.middleware.switches.compression = false;
+    config.middleware.switches.rate_limit = false;
+    config.middleware.switches.request_id = false;
+    config.middleware.rate_limit_requests = 1;
+
+    let app = middleware::apply(
+        Router::new().route("/ping", get(|| async { "a".repeat(64) })),
+        &config,
+    );
+
+    let response = send(
+        app.clone(),
+        Request::builder()
+            .uri("/ping")
+            .header(header::ACCEPT_ENCODING, "gzip")
+            .body(Body::empty())
+            .expect("构造请求"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    for name in [
+        header::X_CONTENT_TYPE_OPTIONS,
+        header::CACHE_CONTROL,
+        header::STRICT_TRANSPORT_SECURITY,
+        header::CONTENT_ENCODING,
+        header::CONTENT_TYPE,
+        axum::http::HeaderName::from_static("x-request-id"),
+    ] {
+        if name == header::CONTENT_TYPE {
+            continue;
+        }
+        assert!(
+            response.headers().get(&name).is_none(),
+            "关闭开关后不应出现 {name}"
+        );
+    }
+
+    // 限流关闭后不再出现 429；超时关闭后慢请求不再被 408 打断
+    for _ in 0..3 {
+        assert_eq!(
+            send(app.clone(), get_request("/ping")).await.status(),
+            StatusCode::OK
+        );
+    }
+    let slow_app = middleware::apply(Router::new().route("/slow", get(slow_handler)), &config);
+    assert_eq!(
+        send(slow_app, get_request("/slow")).await.status(),
+        StatusCode::OK,
+        "关闭超时后慢请求应正常完成"
+    );
+}
+
 fn cors_preflight(origin: &str) -> Request<Body> {
     Request::builder()
         .method("OPTIONS")
@@ -280,4 +375,57 @@ fn cors_preflight(origin: &str) -> Request<Body> {
         .header(header::ACCESS_CONTROL_REQUEST_METHOD, "GET")
         .body(Body::empty())
         .expect("构造请求")
+}
+
+/// 框架层的拒绝（超时/请求体超限）也必须走统一响应结构。
+///
+/// `tower-http` 的 408 是空响应体、413 是纯文本 `length limit exceeded`，
+/// 二者都不符合本服务的响应约定，因此栈里有 `RejectionBodyLayer` 统一改写。
+#[tokio::test]
+async fn framework_rejections_use_the_unified_envelope() {
+    let mut config = base_config();
+    config.middleware.request_timeout_secs = 1;
+    config.middleware.max_body_bytes = 16;
+
+    let app = middleware::apply(
+        Router::new().route("/slow", get(slow_handler)).route(
+            "/upload",
+            post(|body: axum::body::Bytes| async move { body.len().to_string() }),
+        ),
+        &config,
+    );
+
+    let timeout = send(app.clone(), get_request("/slow")).await;
+    assert_eq!(timeout.status(), StatusCode::REQUEST_TIMEOUT);
+    let timeout_body: Value = serde_json::from_slice(
+        &timeout
+            .into_body()
+            .collect()
+            .await
+            .expect("读取响应体")
+            .to_bytes(),
+    )
+    .expect("408 响应体应为 JSON");
+    assert_eq!(timeout_body["code"], 408);
+    assert_eq!(timeout_body["message"], "Request timeout");
+
+    let oversized = Request::builder()
+        .method("POST")
+        .uri("/upload")
+        .header(header::CONTENT_LENGTH, "4096")
+        .body(Body::from(vec![0_u8; 4096]))
+        .expect("构造请求");
+    let response = send(app, oversized).await;
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    let body: Value = serde_json::from_slice(
+        &response
+            .into_body()
+            .collect()
+            .await
+            .expect("读取响应体")
+            .to_bytes(),
+    )
+    .expect("413 响应体应为 JSON");
+    assert_eq!(body["code"], 413);
+    assert_eq!(body["message"], "Request body too large");
 }

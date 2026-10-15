@@ -1,58 +1,17 @@
-use axum_service_scaffold::infrastructure::config::{
-    AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, MiddlewareConfig, ServerConfig,
-};
+mod common;
+
+use axum_service_scaffold::infrastructure::config::AppConfig;
 use axum_service_scaffold::logging;
-use tracing_appender::rolling::Rotation;
 use uuid::Uuid;
 
-const TEST_JWT_SECRET: &str = "logging-test-secret-that-is-long-enough";
-
 fn test_config(out_dir: &str, utc_offset_hour: i8, utc_offset_minute: i8) -> AppConfig {
-    AppConfig {
-        app_name: "axum-service-scaffold".to_string(),
-        app_env: "development".to_string(),
-        server: ServerConfig {
-            host: "127.0.0.1".to_string(),
-            port: 0,
-        },
-        database: DatabaseConfig {
-            url: "sqlite://:memory:".to_string(),
-            min_connections: 1,
-            max_connections: 1,
-            connect_timeout_secs: 5,
-            idle_secs: 30,
-            sqlx_logging: false,
-        },
-        jwt: JwtConfig {
-            secret: TEST_JWT_SECRET.to_string(),
-            issuer: "test-issuer".to_string(),
-            audience: "test-audience".to_string(),
-            access_token_ttl_minutes: 120,
-        },
-        logging: LoggingConfig {
-            filter: "info".to_string(),
-            utc_offset_hour,
-            utc_offset_minute,
-            utc_offset_second: 0,
-            filename_prefix: "logging-test".to_string(),
-            filename_suffix: "log".to_string(),
-            rotation: Rotation::NEVER,
-            max_log_files: 2,
-            out_dir: out_dir.to_string(),
-            batch_max_events: 50,
-            batch_flush_interval_secs: 3,
-        },
-        middleware: MiddlewareConfig {
-            request_timeout_secs: 10,
-            max_body_bytes: 2 * 1024 * 1024,
-            max_concurrency: 256,
-            backpressure_queue: 256,
-            rate_limit_requests: 1000,
-            rate_limit_period_secs: 1,
-            hsts_enabled: false,
-            cors_allowed_origins: Vec::new(),
-        },
-    }
+    let mut config = common::app_config(out_dir);
+    config.logging.utc_offset_hour = utc_offset_hour;
+    config.logging.utc_offset_minute = utc_offset_minute;
+    config.logging.filename_prefix = "logging-test".to_string();
+    config.logging.max_log_files = 2;
+
+    config
 }
 
 #[test]

@@ -4,8 +4,10 @@
 
 use std::sync::{Arc, Mutex};
 
+mod common;
+
 use axum::{Router, body::Body, http::Request, routing::get};
-use axum_service_scaffold::{infrastructure::config::MiddlewareConfig, middleware};
+use axum_service_scaffold::{infrastructure::config::AppConfig, middleware};
 use tower::ServiceExt;
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -45,24 +47,20 @@ fn capture_logs() -> Arc<LogBuffer> {
     buffer
 }
 
-fn base_config() -> MiddlewareConfig {
-    MiddlewareConfig {
-        request_timeout_secs: 10,
-        max_body_bytes: 2 * 1024 * 1024,
-        max_concurrency: 256,
-        backpressure_queue: 256,
-        rate_limit_requests: 1000,
-        rate_limit_period_secs: 1,
-        hsts_enabled: false,
-        cors_allowed_origins: Vec::new(),
-    }
+fn base_config() -> AppConfig {
+    let mut config = common::app_config(&std::env::temp_dir().to_string_lossy());
+    config.middleware.rate_limit_requests = 1000;
+
+    config
 }
 
 #[tokio::test]
 async fn request_id_is_correlated_in_logs() {
     let logs = capture_logs();
     let app = middleware::apply(
-        Router::new().route("/ping", get(|| async { "pong" })),
+        middleware::route_slot::capture_route_templates(
+            Router::new().route("/ping", get(|| async { "pong" })),
+        ),
         &base_config(),
     );
 
@@ -84,7 +82,16 @@ async fn request_id_is_correlated_in_logs() {
         "日志应来自 http_request span: {captured}"
     );
     assert!(
-        captured.contains("request_id=log-correlation-id"),
+        captured.contains("request_id=\"log-correlation-id\""),
         "日志应携带请求的 request_id: {captured}"
+    );
+    // 访问日志必须能按路由模板聚合（不接受把原始路径当标签）。
+    assert!(
+        captured.contains("route=\"/ping\""),
+        "访问日志应携带路由模板: {captured}"
+    );
+    assert!(
+        captured.contains("status=200"),
+        "访问日志应携带响应状态码: {captured}"
     );
 }

@@ -1,23 +1,20 @@
 use std::sync::Arc;
 
+mod common;
+
 use axum::Router;
 use axum::body::Body;
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::Response;
 use axum_service_scaffold::container::Container;
 use axum_service_scaffold::create_app::create_app;
-use axum_service_scaffold::infrastructure::config::{
-    AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, MiddlewareConfig, ServerConfig,
-};
+use axum_service_scaffold::infrastructure::config::AppConfig;
 use chrono::{Duration, Utc};
 use http_body_util::BodyExt;
 use jsonwebtoken::{Algorithm, EncodingKey, Header as JwtHeader, encode};
 use serde_json::{Value, json};
+use std::time::Instant;
 use tower::ServiceExt;
-use tracing_appender::rolling::Rotation;
-use uuid::Uuid;
-
-const TEST_JWT_SECRET: &str = "api-test-secret-that-is-long-enough";
 
 /// 每个测试独立装配一套容器与临时 SQLite 数据库，互不干扰。
 async fn setup_app() -> Router {
@@ -26,60 +23,35 @@ async fn setup_app() -> Router {
 
 /// 与 `setup_app` 相同，但可指定 CORS 来源白名单。
 async fn setup_app_with_cors_origins(cors_allowed_origins: Vec<String>) -> Router {
-    let database_url = format!(
-        "sqlite://{}?mode=rwc",
-        std::env::temp_dir()
-            .join(format!("axum-scaffold-api-test-{}.db", Uuid::now_v7()))
-            .display()
-    );
+    setup_app_with_config(|config| config.middleware.cors_allowed_origins = cors_allowed_origins)
+        .await
+}
 
-    let config = AppConfig {
-        app_name: "axum-service-scaffold".to_string(),
-        app_env: "development".to_string(),
-        server: ServerConfig {
-            host: "127.0.0.1".to_string(),
-            port: 0,
-        },
-        database: DatabaseConfig {
-            url: database_url,
-            min_connections: 1,
-            max_connections: 2,
-            connect_timeout_secs: 5,
-            idle_secs: 30,
-            sqlx_logging: false,
-        },
-        jwt: JwtConfig {
-            secret: TEST_JWT_SECRET.to_string(),
-            issuer: "test-issuer".to_string(),
-            audience: "test-audience".to_string(),
-            access_token_ttl_minutes: 120,
-        },
-        logging: LoggingConfig {
-            filter: "info".to_string(),
-            utc_offset_hour: 8,
-            utc_offset_minute: 0,
-            utc_offset_second: 0,
-            filename_prefix: "api-test".to_string(),
-            filename_suffix: "log".to_string(),
-            rotation: Rotation::NEVER,
-            max_log_files: 1,
-            out_dir: std::env::temp_dir().to_string_lossy().to_string(),
-            batch_max_events: 50,
-            batch_flush_interval_secs: 3,
-        },
-        middleware: MiddlewareConfig {
-            request_timeout_secs: 10,
-            max_body_bytes: 2 * 1024 * 1024,
-            max_concurrency: 256,
-            backpressure_queue: 256,
-            rate_limit_requests: 1000,
-            rate_limit_period_secs: 1,
-            hsts_enabled: false,
-            cors_allowed_origins,
-        },
-    };
+/// 每个测试独立装配一套容器与临时 SQLite 数据库，并可覆盖任意配置项。
+async fn setup_app_with_config(configure: impl FnOnce(&mut AppConfig)) -> Router {
+    let mut config: AppConfig = common::app_config(&std::env::temp_dir().to_string_lossy());
+    config.database = common::database_config(common::temp_database_url("api-test"));
+    config.logging.filename_prefix = "api-test".to_string();
+    config.logging.max_log_files = 1;
+    config.middleware.cors_allowed_origins = vec!["https://example.com".to_string()];
+    configure(&mut config);
 
     let container = Container::bootstrap(config).await.expect("容器装配成功");
+    create_app(Arc::new(container))
+}
+
+/// 直接用已有容器构造应用（需要持有容器句柄的用例使用）。
+fn app_from(container: &Container) -> Router {
+    let container = Container {
+        config: Arc::clone(&container.config),
+        database: container.database.clone(),
+        metrics: container.metrics.clone(),
+        auth_service: Arc::clone(&container.auth_service),
+        example_service: Arc::clone(&container.example_service),
+        system_service: Arc::clone(&container.system_service),
+        transfer_service: Arc::clone(&container.transfer_service),
+    };
+
     create_app(Arc::new(container))
 }
 
@@ -953,7 +925,7 @@ fn expired_token() -> String {
     encode(
         &JwtHeader::new(Algorithm::HS256),
         &claims,
-        &EncodingKey::from_secret(TEST_JWT_SECRET.as_bytes()),
+        &EncodingKey::from_secret(common::TEST_JWT_SECRET.as_bytes()),
     )
     .expect("签发过期令牌")
 }
@@ -992,4 +964,176 @@ async fn dev_login_with_empty_roles_falls_back_to_default_role() {
     let (status, me) = send(app, get_with_bearer("/api/v1/auth/me", token)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(me["data"]["roles"], json!(["developer"]));
+}
+
+/// 404 也必须走统一响应结构：空响应体会让客户端需要处理第二种错误格式。
+#[tokio::test]
+async fn unknown_route_returns_unified_404_body() {
+    let app = setup_app().await;
+    let (status, body) = send(app, get("/api/v1/unknown")).await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], 404);
+    assert_eq!(body["message"], "Route not found");
+    assert!(
+        body.get("data").is_none(),
+        "错误响应不应带 data 字段: {body}"
+    );
+}
+
+/// 405 只在既有 `Allow` 头基础上补齐统一响应体。
+#[tokio::test]
+async fn unsupported_method_returns_unified_405_body() {
+    let app = setup_app().await;
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/v1/system/health")
+        .body(Body::empty())
+        .expect("构造请求");
+    let response = send_response(app, request).await;
+    let allow = response
+        .headers()
+        .get(header::ALLOW)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let status = response.status();
+    let body = read_json(response).await;
+
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(allow.as_deref(), Some("GET,HEAD"));
+    assert_eq!(body["code"], 405);
+    assert_eq!(body["message"], "Method not allowed");
+}
+
+/// 超长 URI 在应用层截断为 414，避免被写进访问日志与指标标签。
+#[tokio::test]
+async fn overlong_uri_is_rejected_with_414() {
+    let app = setup_app_with_config(|config| config.middleware.max_uri_bytes = 256).await;
+    let uri = format!("/api/v1/{}", "a".repeat(1024));
+    let (status, body) = send(app, get(&uri)).await;
+
+    assert_eq!(status, StatusCode::URI_TOO_LONG);
+    assert_eq!(body["code"], 414);
+}
+
+/// Host 白名单：合法 Host 放行，缺失与不在白名单分别回 400 / 421。
+#[tokio::test]
+async fn host_allowlist_is_enforced() {
+    let app = setup_app_with_config(|config| {
+        config.middleware.allowed_hosts = vec!["api.example.com".to_string()];
+    })
+    .await;
+
+    let allowed = Request::builder()
+        .uri("/api/v1/system/health")
+        .header(header::HOST, "api.example.com")
+        .body(Body::empty())
+        .expect("构造请求");
+    assert_eq!(
+        send_response(app.clone(), allowed).await.status(),
+        StatusCode::OK
+    );
+
+    let missing = send_response(app.clone(), get("/api/v1/system/health")).await;
+    assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
+
+    let forged = Request::builder()
+        .uri("/api/v1/system/health")
+        .header(header::HOST, "attacker.example")
+        .body(Body::empty())
+        .expect("构造请求");
+    let response = send_response(app, forged).await;
+    assert_eq!(response.status(), StatusCode::MISDIRECTED_REQUEST);
+}
+
+/// 业务响应默认不可缓存：漏一条 `Cache-Control` 就可能让中间代理缓存住他人数据。
+#[tokio::test]
+async fn business_responses_are_not_cacheable() {
+    let app = setup_app().await;
+    let response = send_response(app, get("/api/v1/system/health")).await;
+
+    let cache_control = response
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        cache_control.contains("no-store"),
+        "业务响应必须携带 Cache-Control: no-store，实际为 {cache_control:?}"
+    );
+    assert!(response.headers().get(header::PRAGMA).is_none());
+}
+
+/// HSTS 按配置组合下发（max-age / includeSubDomains / preload 均可配）。
+#[tokio::test]
+async fn hsts_header_follows_configuration() {
+    let app = setup_app_with_config(|config| {
+        config.middleware.hsts.enabled = true;
+        config.middleware.hsts.max_age_secs = 600;
+        config.middleware.hsts.include_subdomains = true;
+        config.middleware.hsts.preload = true;
+    })
+    .await;
+    let response = send_response(app, get("/api/v1/system/health")).await;
+
+    assert_eq!(
+        response
+            .headers()
+            .get(header::STRICT_TRANSPORT_SECURITY)
+            .and_then(|value| value.to_str().ok()),
+        Some("max-age=600; includeSubDomains; preload")
+    );
+}
+
+/// 数据库连接池取不到连接时，就绪探测必须快速失败并回 `503`。
+///
+/// 这里用「池里只剩 1 个连接且被测试持有」来制造耗尽：`DATABASE_ACQUIRE_TIMEOUT_SECS`
+/// 保证探测不会无限等待，`DATABASE_READY_PROBE_TIMEOUT_SECS` 是外层兜底。
+#[tokio::test]
+async fn ready_fails_with_503_when_the_connection_pool_is_exhausted() {
+    let mut config: AppConfig = common::app_config(&std::env::temp_dir().to_string_lossy());
+    config.database = common::database_config(common::temp_database_url("pool-exhaustion"));
+    config.database.max_connections = 1;
+    config.database.min_connections = 1;
+    config.database.acquire_timeout_secs = 1;
+    config.database.ready_probe_timeout_secs = 5;
+
+    let container = Container::bootstrap(config).await.expect("容器装配成功");
+    // 独占池中唯一连接，后续探测必然取不到连接
+    let held = container
+        .database
+        .get_sqlite_connection_pool()
+        .acquire()
+        .await
+        .expect("取得唯一连接");
+
+    let started = Instant::now();
+    let (status, body) = send(app_from(&container), get("/api/v1/system/ready")).await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "响应体: {body}");
+    assert_eq!(body["code"], 503);
+    assert!(
+        elapsed < std::time::Duration::from_secs(3),
+        "取连接超时应让它快速失败，实际耗时 {elapsed:?}"
+    );
+
+    drop(held);
+    let (status, _) = send(app_from(&container), get("/api/v1/system/ready")).await;
+    assert_eq!(status, StatusCode::OK, "连接归还后应恢复就绪");
+}
+
+/// 数据库不可用（池已关闭）时就绪探测返回 503，而不是 500 或挂住。
+#[tokio::test]
+async fn ready_returns_503_after_the_database_is_closed() {
+    let mut config: AppConfig = common::app_config(&std::env::temp_dir().to_string_lossy());
+    config.database = common::database_config(common::temp_database_url("ready-closed"));
+    config.database.ready_probe_timeout_secs = 2;
+
+    let container = Container::bootstrap(config).await.expect("容器装配成功");
+    let app = app_from(&container);
+    container.database.close_by_ref().await.expect("关闭连接池");
+
+    let (status, body) = send(app, get("/api/v1/system/ready")).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "响应体: {body}");
 }
