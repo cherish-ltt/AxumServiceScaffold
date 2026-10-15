@@ -1,6 +1,7 @@
 use anyhow::Result;
 use axum_service_scaffold::{
     container::Container, create_app::create_app, infrastructure::config::AppConfig, logging,
+    server::Server,
 };
 use dotenv::dotenv;
 use mimalloc::MiMalloc;
@@ -17,12 +18,12 @@ static GLOBAL: MiMalloc = MiMalloc;
 ///
 /// 启动流程固定为：
 ///
-/// 1. 读取环境变量
+/// 1. 读取环境变量（含生产环境安全门控校验）
 /// 2. 初始化日志
 /// 3. 打印生效配置
-/// 4. 构建全局状态
+/// 4. 构建全局状态（含指标出口）
 /// 5. 构建 Axum 路由
-/// 6. 启动 HTTP 服务
+/// 6. 启动 HTTP 服务（自定义 accept 循环，含连接层防护与关闭期限）
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv().ok();
@@ -32,43 +33,19 @@ async fn main() -> Result<()> {
     logging::log_startup_config(&config);
 
     let container = Arc::new(Container::bootstrap(config).await?);
-    let app = create_app(container.clone());
-    let address = container.config.server.socket_addr()?;
+    let app = create_app(Arc::clone(&container));
+    let server = Server::bind(Arc::clone(&container.config), app).await?;
+    info!(
+        address = %server.local_addr()?,
+        "HTTP server started successfully"
+    );
 
-    let listener = tokio::net::TcpListener::bind(address).await?;
-    info!(address = %address, "HTTP server started successfully");
-
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    server.run_until_signal().await?;
 
     info!("HTTP server shut down gracefully");
     if let Err(error) = container.database.close_by_ref().await {
         tracing::warn!(%error, "failed to close the database connection pool");
     }
+
     Ok(())
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to listen for Ctrl-C signal");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to listen for termination signal")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => info!("received Ctrl-C, starting graceful shutdown"),
-        _ = terminate => info!("received termination signal, starting graceful shutdown"),
-    }
 }
