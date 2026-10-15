@@ -90,10 +90,14 @@ jobs:
         run: cargo clippy --all-targets --features docs -- -D warnings
 
       - name: Check release + docs combination
-        run: cargo check --release --features docs
+        # 用 build 而非 check：check 只产出 metadata，后续的 release 测试无法复用，
+        # 会让 release 依赖被完整编译两遍。
+        run: cargo build --release --features docs
 
       - name: Build the project
-        run: cargo build --verbose
+        # 与下一条 `cargo test --features docs` 共用同一套 feature 集合，
+        # 避免 dev 依赖被按两种组合各编译一遍。
+        run: cargo build --features docs --verbose
 
       - name: Run tests
         run: cargo test --features docs --verbose
@@ -146,6 +150,10 @@ jobs:
 - 依赖项必须**归类**，使用 `#` 注释说明每组依赖的用途。
 - 每个依赖必须使用 `version = "x.y.z"` **锁定具体版本**（使用 `=` 号），不得使用范围限定符。
 - 使用 `edition = "2024"` 以及环境中的 Rust 版本，例如:`rust-version = "1.99.0"`
+- `[profile.dev]` 与 `[profile.dev.package."*"]` 必须显式写在 `Cargo.toml` 中，不得只依赖
+  `~/.cargo/config.toml`：profile 不一致会让 fingerprint 全部失效并触发依赖全量重编译。
+  开发构建保留行号级调试信息（`debug = 1`），依赖侧关闭（`debug = false`）——
+  完整调试信息是单个测试二进制 200 MB+、链接耗时以分钟计的主要来源。
 
 示例结构：
 
@@ -176,8 +184,10 @@ criterion = { version = "=0.5.1" }
 # 编译优化配置
 [profile.dev]
 opt-level = 1
+debug = 1
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
 ```
 
 ---
@@ -232,7 +242,9 @@ msrv = "1.99.0"
 
 所有代码必须通过 `cargo clippy --all-targets --features docs -- -D warnings` 检查，无警告
 （与 CI 一致；`docs` feature 必须打开，否则文档代码不在检查范围内）。`--all-features` 会额外
-编译 `preset` / `http-client` 两个可选依赖 bundle，pre-commit 钩子用它做本地兜底。
+编译 `preset` / `http-client` 两个可选依赖 bundle，因此只在 pre-push 阶段兜底跑一次；
+pre-commit 钩子必须与 CI 同用 `--features docs`——两种 feature 集合交替执行会让依赖树
+（含 `aws-lc-sys` / `libsqlite3-sys` / `ring` 等 C 依赖）反复全量重编译。
 
 ---
 
