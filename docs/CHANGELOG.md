@@ -17,6 +17,12 @@
 
 - `.env-example` 为客户端并发、速率、注册表容量与空闲保留期补齐逐项注释（含义、响应码与校验
   约束），并说明可信代理的 `*` 语义与生产限制；`docs/MIDDLEWARE.md` 同步更新配置表格与部署章节。
+- `.env-example` 与 `.env` 统一为代码真实读取的全部配置项（40 项，含以注释形式给出的
+  `MIDDLEWARE_HSTS_ENABLED`），逐条补全校验约束与默认值说明，并修正与实现不符的描述
+  （`APP_ENV` 的实际启动校验范围、可信代理不使用 `X-Real-IP`）。同时移除模板中 27 项从未被
+  代码读取的配置项（`METRICS_*`、`HTTP_ALLOWED_HOSTS`、9 个 `MIDDLEWARE_*_ENABLED` 开关、
+  `SERVER_HTTP1_*`、`SHUTDOWN_TIMEOUT_SECS`、`LOG_FORMAT`、`LOG_MAX_FILE_BYTES`、
+  `MIDDLEWARE_HSTS_MAX_AGE_SECS` 等），避免照抄后误以为已生效。
 
 ## [0.8.0] - 2026-10-16
 
