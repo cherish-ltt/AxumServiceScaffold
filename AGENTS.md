@@ -311,6 +311,11 @@ msrv = "1.99.0"
 - 已推送的 tag 如需补充或修正 message，先删除本地与远程 tag 再重打重推
   （`git tag -d` + `git push origin :refs/tags/<tag>`），避免 tag 内容与实际发布不符。
 
+### 10.11 请求诊断与失败隔离
+
+- production 配置必须拒绝 debug 构建，main 启动校验与 create_app 嵌入入口都守住边界。
+  docs feature 仍独立，release + docs 必须能编译，生产文档访问由网关限制。
+
 ### 10.9 OpenAPI 文档（`docs` feature）
 
 - Swagger UI 与 OpenAPI 文档（`src/docs.rs`、`utoipa`/`utoipa-swagger-ui`）统一由

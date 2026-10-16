@@ -90,6 +90,15 @@ pub struct MiddlewareConfig {
 }
 
 impl AppConfig {
+    pub fn validate_runtime(&self) -> Result<()> {
+        if self.app_env.eq_ignore_ascii_case("production") && cfg!(debug_assertions) {
+            return Err(anyhow!(
+                "production requires a release build: debug authentication routes are unsafe"
+            ));
+        }
+        Ok(())
+    }
+
     pub fn from_env() -> Result<Self> {
         let app_name = get_env_or("APP_NAME", "axum-service-scaffold");
         let app_env = get_env_or("APP_ENV", "development");

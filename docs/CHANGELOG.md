@@ -5,6 +5,12 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本 2.0.0](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- production 配置拒绝 debug 构建，防止误暴露开发认证。
+
 ## [0.7.0] - 2026-10-14
 
 ### 新增

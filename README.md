@@ -109,7 +109,8 @@ cargo run
 - `/api/v1/system/ready`：数据库就绪检查，数据库不可用时返回 `503 Service Unavailable`。
 
 > 开发登录接口（`POST /api/v1/auth/dev-login`）仅在 debug 构建提供，release 构建不存在该入口；
-> 不要在生产环境使用 `.env-example` 中的示例 JWT 密钥。
+> 不要在生产环境使用 `.env-example` 中的示例 JWT 密钥。`APP_ENV=production` 必须使用 release
+> 构建，否则拒绝启动，防止误暴露开发认证接口。
 
 ## 默认接口
 

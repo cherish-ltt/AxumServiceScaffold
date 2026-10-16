@@ -28,6 +28,7 @@ async fn main() -> Result<()> {
     dotenv().ok();
 
     let config = AppConfig::from_env()?;
+    config.validate_runtime()?;
     let _log_guard = logging::init(&config)?;
     logging::log_startup_config(&config);
 

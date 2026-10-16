@@ -211,6 +211,29 @@ fn production_accepts_custom_secret() {
 }
 
 #[test]
+fn production_runtime_requires_release() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("APP_ENV", Some("production")),
+        ],
+        || {
+            let config = AppConfig::from_env().unwrap();
+            assert_eq!(config.validate_runtime().is_err(), cfg!(debug_assertions));
+        },
+    );
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("APP_ENV", Some("development")),
+        ],
+        || {
+            assert!(AppConfig::from_env().unwrap().validate_runtime().is_ok());
+        },
+    );
+}
+
+#[test]
 fn production_rejects_example_jwt_secret() {
     with_env(
         &[
