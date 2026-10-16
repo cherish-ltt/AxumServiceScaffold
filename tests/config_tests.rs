@@ -1,4 +1,5 @@
 use std::env;
+use std::net::IpAddr;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use axum_service_scaffold::infrastructure::config::{AppConfig, ServerConfig};
@@ -570,8 +571,62 @@ fn zero_middleware_capacity_is_rejected() {
 }
 
 #[test]
+fn wildcard_trusted_proxies_cover_every_peer() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("MIDDLEWARE_TRUSTED_PROXIES", Some("*")),
+        ],
+        || {
+            let config = AppConfig::from_env().expect("`*` 应可加载");
+            let nets = &config.middleware.trusted_proxies;
+            assert_eq!(nets.len(), 2);
+            for peer in ["203.0.113.7", "2001:db8::1"] {
+                let peer: IpAddr = peer.parse().expect("测试用地址应合法");
+                assert!(
+                    nets.iter().any(|net| net.contains(&peer)),
+                    "`*` 应覆盖 {peer}"
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn production_rejects_trust_all_proxies() {
+    for value in ["*", "0.0.0.0/0"] {
+        with_env(
+            &[
+                ("APP_ENV", Some("production")),
+                ("JWT_SECRET", Some(CUSTOM_SECRET)),
+                ("MIDDLEWARE_TRUSTED_PROXIES", Some(value)),
+            ],
+            || {
+                let error = AppConfig::from_env().expect_err("生产环境信任全部对端应被拒绝");
+                assert!(
+                    error
+                        .to_string()
+                        .contains("MIDDLEWARE_TRUSTED_PROXIES must not trust every peer"),
+                    "{value} 的报错信息不符合预期: {error}"
+                );
+            },
+        );
+    }
+    with_env(
+        &[
+            ("APP_ENV", Some("development")),
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("MIDDLEWARE_TRUSTED_PROXIES", Some("0.0.0.0/0")),
+        ],
+        || {
+            assert!(AppConfig::from_env().is_ok());
+        },
+    );
+}
+
+#[test]
 fn invalid_client_configuration_is_rejected() {
-    for value in ["*", "10.0.0.1/99", "not-an-ip"] {
+    for value in ["*,10.0.0.0/8", "10.0.0.1/99", "not-an-ip"] {
         with_env(
             &[
                 ("JWT_SECRET", Some(CUSTOM_SECRET)),

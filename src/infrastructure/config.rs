@@ -1,4 +1,8 @@
-use std::{env, net::SocketAddr, str::FromStr};
+use std::{
+    env,
+    net::{IpAddr, SocketAddr},
+    str::FromStr,
+};
 
 use anyhow::{Context, Result, anyhow};
 use axum::http::HeaderValue;
@@ -201,6 +205,17 @@ impl AppConfig {
             batch_flush_interval_secs,
         };
 
+        let trusted_proxies = parse_proxies(&get_env_or("MIDDLEWARE_TRUSTED_PROXIES", ""))?;
+        // 信任所有对端等于把 X-Forwarded-For 交给客户端自报，按 IP 的额度随之失效；
+        // 前缀长度为 0 的网段（`*` 与手写的 0.0.0.0/0）在启动时直接拒绝。
+        if app_env.eq_ignore_ascii_case("production")
+            && trusted_proxies.iter().any(|net| net.prefix_len() == 0)
+        {
+            return Err(anyhow!(
+                "MIDDLEWARE_TRUSTED_PROXIES must not trust every peer in production"
+            ));
+        }
+
         let middleware = MiddlewareConfig {
             request_timeout_secs: parse_env_or("MIDDLEWARE_REQUEST_TIMEOUT_SECS", 10_u64)?,
             max_body_bytes: parse_env_or("MIDDLEWARE_MAX_BODY_BYTES", 2 * 1024 * 1024_usize)?,
@@ -216,7 +231,7 @@ impl AppConfig {
                 "MIDDLEWARE_CORS_ALLOWED_ORIGINS",
                 "",
             ))?,
-            trusted_proxies: parse_proxies(&get_env_or("MIDDLEWARE_TRUSTED_PROXIES", ""))?,
+            trusted_proxies,
             client_max_concurrency: parse_env_or("MIDDLEWARE_CLIENT_MAX_CONCURRENCY", 32_usize)?,
             client_rate_limit_requests: parse_env_or(
                 "MIDDLEWARE_CLIENT_RATE_LIMIT_REQUESTS",
@@ -292,17 +307,35 @@ fn parse_origins(raw: &str) -> Result<Vec<String>> {
     Ok(origins)
 }
 
+/// `*` 的展开形式：包含判断只看网段，信任全部 IPv4 与 IPv6 即等价于信任所有直连对端。
+const TRUST_ALL_PROXIES: [&str; 2] = ["0.0.0.0/0", "::/0"];
+
+/// 解析可信代理列表：接受 CIDR 或单个 IP，`*` 表示信任所有直连对端。
+///
+/// `*` 与具体条目混写会拒绝启动，避免「只多信任一个网段」被误读成放行全部。
 fn parse_proxies(raw: &str) -> Result<Vec<IpNet>> {
-    raw.split(',')
+    let entries: Vec<&str> = raw
+        .split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| {
-            value
-                .parse::<IpNet>()
-                .or_else(|_| value.parse::<std::net::IpAddr>().map(IpNet::from))
-                .map_err(|_| anyhow!("invalid MIDDLEWARE_TRUSTED_PROXIES entry: {value}"))
-        })
-        .collect()
+        .collect();
+    match entries.as_slice() {
+        ["*"] => TRUST_ALL_PROXIES
+            .iter()
+            .map(|net| parse_proxy(net))
+            .collect(),
+        entries if entries.contains(&"*") => Err(anyhow!(
+            "MIDDLEWARE_TRUSTED_PROXIES: `*` cannot be combined with explicit entries"
+        )),
+        entries => entries.iter().map(|value| parse_proxy(value)).collect(),
+    }
+}
+
+fn parse_proxy(value: &str) -> Result<IpNet> {
+    value
+        .parse::<IpNet>()
+        .or_else(|_| value.parse::<IpAddr>().map(IpNet::from))
+        .map_err(|_| anyhow!("invalid MIDDLEWARE_TRUSTED_PROXIES entry: {value}"))
 }
 
 fn parse_env_or<T>(key: &str, default: T) -> Result<T>
