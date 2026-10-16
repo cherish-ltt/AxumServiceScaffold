@@ -327,6 +327,7 @@ msrv = "1.99.0"
   或外部副作用撤销。所有许可在取消时释放，错误 JSON 统一且保留 request_id / 安全头 / Allow。
 - 路由模板捕获允许在统一装配点施加无状态 route_layer；controller 不得自行装配中间件。
 - 每请求仅一条访问或诊断事件；慢请求、408、业务 5xx 汇总阶段，429/容量拒绝不逐条告警。
+  services 的关键 IO 使用固定阶段名 measure，不逐阶段打印或记录用户输入、SQL、参数。
 - 请求 panic 保留错误日志并返回安全 500；仅隔离请求错误，不保证任意共享状态可恢复。
 - production 配置必须拒绝 debug 构建，main 启动校验与 create_app 嵌入入口都守住边界。
   docs feature 仍独立，release + docs 必须能编译，生产文档访问由网关限制。

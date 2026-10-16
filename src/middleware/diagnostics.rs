@@ -1,4 +1,6 @@
 use std::{
+    collections::BTreeMap,
+    future::Future,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -14,6 +16,10 @@ use tracing::Instrument;
 use super::client_ip::{ClientIp, IdentityError};
 use crate::{infrastructure::config::MiddlewareConfig, response::ApiResponse};
 
+tokio::task_local! {
+    static CURRENT: Diagnostics;
+}
+
 #[derive(Clone, Default)]
 struct Diagnostics(Arc<Mutex<Details>>);
 
@@ -21,6 +27,48 @@ struct Diagnostics(Arc<Mutex<Details>>);
 struct Details {
     route: Option<String>,
     queue_ms: Option<u64>,
+    stages: BTreeMap<&'static str, Stage>,
+}
+
+#[derive(Debug, Default)]
+struct Stage {
+    elapsed_ms: u64,
+    calls: u64,
+    interrupted: u64,
+}
+
+struct Timer {
+    diagnostics: Diagnostics,
+    name: &'static str,
+    start: Instant,
+    completed: bool,
+}
+
+impl Drop for Timer {
+    fn drop(&mut self) {
+        let mut details = self.diagnostics.0.lock().unwrap_or_else(|e| e.into_inner());
+        let stage = details.stages.entry(self.name).or_default();
+        stage.elapsed_ms += millis(self.start.elapsed());
+        stage.calls += 1;
+        stage.interrupted += u64::from(!self.completed);
+    }
+}
+
+/// 测量阶段但不逐阶段打印日志；必须使用固定名称，不能带用户输入或 SQL。
+pub(crate) async fn measure<F: Future>(name: &'static str, future: F) -> F::Output {
+    let mut timer = CURRENT
+        .try_with(|diagnostics| Timer {
+            diagnostics: diagnostics.clone(),
+            name,
+            start: Instant::now(),
+            completed: false,
+        })
+        .ok();
+    let result = future.await;
+    if let Some(timer) = timer.as_mut() {
+        timer.completed = true;
+    }
+    result
 }
 
 #[derive(Clone)]
@@ -49,15 +97,9 @@ pub(crate) async fn observe(
         .unwrap_or_default();
     let span = tracing::info_span!(target: "http_request", "http_request", method = %request.method(), path = %request.uri().path(), request_id = %request_id, client_ip = %client_ip);
     async move {
-        let mut response = match tokio::time::timeout(
-            Duration::from_secs(config.request_timeout_secs),
-            next.run(request),
-        )
-        .await
-        {
+        let mut response = match tokio::time::timeout(Duration::from_secs(config.request_timeout_secs), next.run(request)).await {
             Ok(response) => normalize(response),
-            Err(_) => ApiResponse::<()>::error(StatusCode::REQUEST_TIMEOUT, "Request timed out")
-                .into_response(),
+            Err(_) => ApiResponse::<()>::error(StatusCode::REQUEST_TIMEOUT, "Request timed out").into_response(),
         };
         if is_head {
             *response.body_mut() = axum::body::Body::empty();
@@ -67,18 +109,13 @@ pub(crate) async fn observe(
         let status = response.status().as_u16();
         let route = details.route.as_deref().unwrap_or("unmatched");
         let queue_ms = details.queue_ms.unwrap_or(elapsed_ms);
-        if elapsed_ms >= config.slow_request_ms
-            || status == 408
-            || (status >= 500 && (status != 503 || details.route.is_some()))
-        {
-            tracing::warn!(status, elapsed_ms, route, queue_ms, "request diagnostic");
+        if elapsed_ms >= config.slow_request_ms || status == 408 || (status >= 500 && (status != 503 || details.route.is_some())) {
+            tracing::warn!(status, elapsed_ms, route, queue_ms, stages = ?details.stages, "request diagnostic");
         } else {
             tracing::info!(status, elapsed_ms, route, "request completed");
         }
         response
-    }
-    .instrument(span)
-    .await
+    }.instrument(span).await
 }
 
 pub(crate) async fn enter(mut request: Request, next: Next) -> Response {
@@ -94,7 +131,7 @@ pub(crate) async fn enter(mut request: Request, next: Next) -> Response {
             .unwrap_or_else(|e| e.into_inner())
             .queue_ms = Some(millis(arrival.0.elapsed()));
     }
-    next.run(request).await
+    CURRENT.scope(diagnostics, next.run(request)).await
 }
 
 pub(crate) async fn route(request: Request, next: Next) -> Response {
@@ -144,4 +181,38 @@ fn normalize(response: Response) -> Response {
 
 fn millis(duration: Duration) -> u64 {
     duration.as_millis().min(u64::MAX as u128) as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stages_aggregate_and_record_cancellation_without_extra_events() {
+        let diagnostics = Diagnostics::default();
+        CURRENT
+            .scope(diagnostics.clone(), async {
+                measure("db.query", async {}).await;
+                measure("db.query", async {}).await;
+                assert!(
+                    tokio::time::timeout(
+                        Duration::from_millis(5),
+                        measure("db.wait", std::future::pending::<()>())
+                    )
+                    .await
+                    .is_err()
+                );
+            })
+            .await;
+        let details = diagnostics.0.lock().unwrap();
+        assert_eq!(details.stages["db.query"].calls, 2);
+        assert_eq!(details.stages["db.query"].interrupted, 0);
+        assert_eq!(details.stages["db.wait"].interrupted, 1);
+        assert!(details.stages["db.wait"].elapsed_ms >= 5);
+    }
+
+    #[tokio::test]
+    async fn measurements_work_without_request_context() {
+        assert_eq!(measure("outside", async { 42 }).await, 42);
+    }
 }

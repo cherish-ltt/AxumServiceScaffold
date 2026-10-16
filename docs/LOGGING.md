@@ -43,7 +43,17 @@ rg 'request diagnostic|route="/api/v1/transactions/\{id\}"' log/
 
 - `elapsed_ms`：包含全局排队、处理和响应头生成；不等于客户端完整下载时间。
 - `queue_ms`：到进入 handler 前诊断层的耗时；未进入时显示当前已等待时间，route 为 unmatched。
-- 当前记录路由和排队时间；业务 IO 阶段需要在 services 内进一步标记，未标记的代码不自动细分。
+- `stages`：事务例子已测量 db.begin、find_account、debit、credit、insert_record、insert_audit、
+  commit、rollback，以及读流水/审计/分页；ready 检查使用 db.ready。
+  `elapsed_ms` 为该阶段累计墙钟耗时，`calls` 为次数，`interrupted` 表示超时/取消/异常中断。
+- queue_ms 大而数据库阶段不大：先看过载/排队；db.begin 大：检查连接池和 SQLite 写锁；
+  db.ready/查询阶段大：检查连接池、慢查询与数据库状态。这些时间包含取连接等待，
+  不能把它直接当成纯 SQL 执行时间，也不能精确区分连接池等待和 SQLite 锁等待。
+- 新业务在 services 中用 `crate::middleware::measure("固定阶段名", future).await` 标记外部
+  IO 边界即可，不逐阶段打印；阶段名不得拼接用户输入。普通函数不在请求上下文时行为不变。
+  `tokio::spawn` 不继承 task-local 阶段上下文，因此独立任务不能据此得到完整阶段数据。
+- 这里没有公开的诊断/指标端点、SQL 查询明细或全量分布式追踪；未标记的代码无法自动细分，
+  并行阶段的累计时间不能相加当成总耗时。比起复制线上环境，本功能先提供线上请求的阶段证据。
 
 使用默认 LOG_FILTER 即能看到诊断；若只想保留慢请求及异常，可设
 `LOG_FILTER=info,axum_service_scaffold::middleware::diagnostics=warn`，普通访问日志会减少。

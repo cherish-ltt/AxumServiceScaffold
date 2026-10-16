@@ -9,4 +9,5 @@ pub(crate) mod diagnostics;
 mod error_response;
 mod stack;
 
+pub(crate) use diagnostics::measure;
 pub use stack::apply;

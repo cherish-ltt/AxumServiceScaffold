@@ -53,7 +53,8 @@ cargo test --features docs
 - 请求必须注入真实或测试 ConnectInfo<SocketAddr>；缺少对端时保护层失败关闭，返回 500。
 - 框架的 400/404/405/413/415/422 错误也归一化为 JSON，不回显原始解析内容。
 - tests/client_protection_tests.rs 验证代理防伪、IP 额度隔离、跨路由共享与取消释放；
-  tests/middleware_log_tests.rs 独立进程覆盖低噪声日志、路由模板和 query 不泄漏。
+  tests/middleware_log_tests.rs 独立进程覆盖低噪声日志、路由模板、query 不泄漏，
+  并用真实 SQLite 连接池耗尽验证 db.ready 中断诊断。
 - 覆盖率使用 `cargo llvm-cov --features docs --summary-only`，要求行覆盖率 ≥80%。
 
 新增接口时按同样方式补一条 `oneshot` 用例即可，无需启动服务或 mock 端口。
