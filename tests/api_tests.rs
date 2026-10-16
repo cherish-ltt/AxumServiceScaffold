@@ -76,6 +76,13 @@ async fn setup_app_with_cors_origins(cors_allowed_origins: Vec<String>) -> Route
             rate_limit_period_secs: 1,
             hsts_enabled: false,
             cors_allowed_origins,
+            trusted_proxies: Vec::new(),
+            client_max_concurrency: 32,
+            client_rate_limit_requests: 1024,
+            client_rate_limit_period_secs: 1,
+            client_max_entries: 16384,
+            client_idle_secs: 60,
+            slow_request_ms: 1000,
         },
     };
 
@@ -83,7 +90,10 @@ async fn setup_app_with_cors_origins(cors_allowed_origins: Vec<String>) -> Route
     create_app(Arc::new(container))
 }
 
-async fn send_response(app: Router, request: Request<Body>) -> Response {
+async fn send_response(app: Router, mut request: Request<Body>) -> Response {
+    request.extensions_mut().insert(axum::extract::ConnectInfo(
+        "127.0.0.1:12345".parse::<std::net::SocketAddr>().unwrap(),
+    ));
     app.oneshot(request).await.expect("请求应成功返回")
 }
 
@@ -769,7 +779,7 @@ async fn error_responses_follow_the_unified_envelope() {
     }
 }
 
-/// 请求体解析失败由提取器直接拒绝，响应是 axum 产生的纯文本，这里只锁定状态码契约。
+/// 提取器错误由统一请求观测层转换为稳定 JSON，不回显解析细节。
 #[tokio::test]
 async fn malformed_json_body_is_rejected_with_400() {
     let app = setup_app().await;
@@ -780,10 +790,10 @@ async fn malformed_json_body_is_rejected_with_400() {
         .body(Body::from("{not json}"))
         .expect("构造请求");
 
-    assert_eq!(
-        send_response(app, request).await.status(),
-        StatusCode::BAD_REQUEST
-    );
+    let (status, body) = send(app, request).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], 400);
+    assert_eq!(body["message"], "Invalid request");
 }
 
 #[tokio::test]
@@ -795,30 +805,26 @@ async fn missing_json_content_type_is_rejected_with_415() {
         .body(Body::from(r#"{"title":"x"}"#))
         .expect("构造请求");
 
-    assert_eq!(
-        send_response(app, request).await.status(),
-        StatusCode::UNSUPPORTED_MEDIA_TYPE
-    );
+    let (status, body) = send(app, request).await;
+    assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(body["code"], 415);
 }
 
 #[tokio::test]
 async fn json_body_missing_required_field_is_rejected_with_422() {
     let app = setup_app().await;
-    let status = send_response(app, post_json("/api/v1/examples/echo", json!({})))
-        .await
-        .status();
-
+    let (status, body) = send(app, post_json("/api/v1/examples/echo", json!({}))).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["code"], 422);
+    assert_eq!(body["message"], "Invalid request fields");
 }
 
 #[tokio::test]
 async fn non_numeric_query_param_is_rejected_with_400() {
     let app = setup_app().await;
-    let status = send_response(app, get("/api/v1/examples?size=abc"))
-        .await
-        .status();
-
+    let (status, body) = send(app, get("/api/v1/examples?size=abc")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], 400);
 }
 
 #[tokio::test]

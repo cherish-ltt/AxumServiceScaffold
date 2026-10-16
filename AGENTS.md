@@ -286,7 +286,7 @@ msrv = "1.99.0"
   `cors`、`trace`、`request-id`、`limit`、`timeout`、`set-header`、`compression-gzip`。
 - 限流（`429`）与背压（`503`）触发时是批量拒绝，逐条告警无信息量：
   `src/middleware/error_response.rs` 不得为这两类拒绝打印逐条 `warn` 日志，
-  每次请求（含被拒绝的请求）由 `TraceLayer` 的访问日志（INFO）覆盖；
+  每次请求（含被拒绝的请求）由请求观测层的一条访问/诊断日志覆盖；
   `internal()` 等真正的内部错误仍须保留 `error!` 日志。
 
 ### 10.7 日志分批写入
@@ -311,8 +311,23 @@ msrv = "1.99.0"
 - 已推送的 tag 如需补充或修正 message，先删除本地与远程 tag 再重打重推
   （`git tag -d` + `git push origin :refs/tags/<tag>`），避免 tag 内容与实际发布不符。
 
+### 10.10 客户端 IP 与保护
+
+- HTTP 监听必须通过 `into_make_service_with_connect_info::<SocketAddr>()` 注入真实 TCP 对端；
+  HTTP 集成测试须显式注入 `ConnectInfo<SocketAddr>`，缺少对端信息时拒绝请求，不静默绕过保护。
+- 客户端以规范化 IP 为键，共享出口共用额度；仅对 `MIDDLEWARE_TRUSTED_PROXIES` 显式 IP/CIDR
+  采信 `X-Forwarded-For`，从右向左剥离可信代理。不要相信所有转发头或默认信任私网。
+- 客户端并发许可必须在取消、超时和异常退出时释放；注册表有界，活动项不得驱逐，
+  空闲保留期不得小于限流周期。容量参数集中在 `MiddlewareConfig`，同步模板、测试和文档。
+- 访问日志不得记录 query、Authorization 或请求体；客户端 IP 和请求 ID 用于请求追溯。
+
 ### 10.11 请求诊断与失败隔离
 
+- 请求观测与总超时必须放在全局排队层外；超时涵盖排队至响应头产生，不保证响应流期限
+  或外部副作用撤销。所有许可在取消时释放，错误 JSON 统一且保留 request_id / 安全头 / Allow。
+- 路由模板捕获允许在统一装配点施加无状态 route_layer；controller 不得自行装配中间件。
+- 每请求仅一条访问或诊断事件；慢请求、408、业务 5xx 汇总阶段，429/容量拒绝不逐条告警。
+- 请求 panic 保留错误日志并返回安全 500；仅隔离请求错误，不保证任意共享状态可恢复。
 - production 配置必须拒绝 debug 构建，main 启动校验与 create_app 嵌入入口都守住边界。
   docs feature 仍独立，release + docs 必须能编译，生产文档访问由网关限制。
 

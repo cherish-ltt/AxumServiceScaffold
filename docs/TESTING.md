@@ -50,7 +50,10 @@ cargo test --features docs
 - `Router` 在 `oneshot` 后即被消费，需要多次请求时先 `app.clone()`。
 - 黑盒测试锁定的是对外契约：HTTP 状态码、`{code, message, data?, timestamp}` 统一响应结构、
   CORS 预检与 `allow` 响应头，以及 400/401/404/405/409/415/422 等错误语义。
-- 请求体未通过 JSON 提取器时（400/415/422）响应是 axum 生成的纯文本，不属于统一响应结构，
-  这类用例只断言状态码。
+- 请求必须注入真实或测试 ConnectInfo<SocketAddr>；缺少对端时保护层失败关闭，返回 500。
+- 框架的 400/404/405/413/415/422 错误也归一化为 JSON，不回显原始解析内容。
+- tests/client_protection_tests.rs 验证代理防伪、IP 额度隔离、跨路由共享与取消释放；
+  tests/middleware_log_tests.rs 独立进程覆盖低噪声日志、路由模板和 query 不泄漏。
+- 覆盖率使用 `cargo llvm-cov --features docs --summary-only`，要求行覆盖率 ≥80%。
 
 新增接口时按同样方式补一条 `oneshot` 用例即可，无需启动服务或 mock 端口。
