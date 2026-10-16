@@ -36,6 +36,17 @@ pub async fn rate_limited(err: BoxError) -> Response {
     internal(err)
 }
 
+pub(crate) fn panic_response(err: Box<dyn std::any::Any + Send>) -> Response {
+    let detail = err
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| err.downcast_ref::<&str>().copied())
+        .unwrap_or("non-string panic");
+    tracing::error!(panic = detail, "request handler panicked");
+    ApiResponse::<()>::error(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")
+        .into_response()
+}
+
 fn internal(err: BoxError) -> Response {
     tracing::error!("middleware stack internal error: {err}");
     ApiResponse::<()>::error(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error")

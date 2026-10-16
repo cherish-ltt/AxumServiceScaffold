@@ -103,6 +103,13 @@ fn valid_config_loads_with_defaults() {
             ("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", None),
             ("MIDDLEWARE_HSTS_ENABLED", None),
             ("MIDDLEWARE_CORS_ALLOWED_ORIGINS", None),
+            ("MIDDLEWARE_TRUSTED_PROXIES", None),
+            ("MIDDLEWARE_CLIENT_MAX_CONCURRENCY", None),
+            ("MIDDLEWARE_CLIENT_RATE_LIMIT_REQUESTS", None),
+            ("MIDDLEWARE_CLIENT_RATE_LIMIT_PERIOD_SECS", None),
+            ("MIDDLEWARE_CLIENT_MAX_ENTRIES", None),
+            ("MIDDLEWARE_CLIENT_IDLE_SECS", None),
+            ("MIDDLEWARE_SLOW_REQUEST_MS", None),
         ],
         || {
             let config = AppConfig::from_env().expect("默认配置应可加载");
@@ -137,6 +144,13 @@ fn valid_config_loads_with_defaults() {
             assert_eq!(config.middleware.rate_limit_period_secs, 1);
             assert!(!config.middleware.hsts_enabled);
             assert!(config.middleware.cors_allowed_origins.is_empty());
+            assert!(config.middleware.trusted_proxies.is_empty());
+            assert_eq!(config.middleware.client_max_concurrency, 32);
+            assert_eq!(config.middleware.client_rate_limit_requests, 1024);
+            assert_eq!(config.middleware.client_rate_limit_period_secs, 1);
+            assert_eq!(config.middleware.client_max_entries, 16384);
+            assert_eq!(config.middleware.client_idle_secs, 60);
+            assert_eq!(config.middleware.slow_request_ms, 1000);
         },
     );
 }
@@ -206,6 +220,29 @@ fn production_accepts_custom_secret() {
         || {
             let result = AppConfig::from_env();
             assert!(result.is_ok());
+        },
+    );
+}
+
+#[test]
+fn production_runtime_requires_release() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("APP_ENV", Some("production")),
+        ],
+        || {
+            let config = AppConfig::from_env().unwrap();
+            assert_eq!(config.validate_runtime().is_err(), cfg!(debug_assertions));
+        },
+    );
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("APP_ENV", Some("development")),
+        ],
+        || {
+            assert!(AppConfig::from_env().unwrap().validate_runtime().is_ok());
         },
     );
 }
@@ -422,6 +459,16 @@ fn middleware_overrides_are_applied() {
             ("MIDDLEWARE_RATE_LIMIT_PERIOD_SECS", Some("2")),
             ("MIDDLEWARE_HSTS_ENABLED", Some("true")),
             (
+                "MIDDLEWARE_TRUSTED_PROXIES",
+                Some("10.0.0.0/8, ::1, 127.0.0.1"),
+            ),
+            ("MIDDLEWARE_CLIENT_MAX_CONCURRENCY", Some("4")),
+            ("MIDDLEWARE_CLIENT_RATE_LIMIT_REQUESTS", Some("20")),
+            ("MIDDLEWARE_CLIENT_RATE_LIMIT_PERIOD_SECS", Some("2")),
+            ("MIDDLEWARE_CLIENT_MAX_ENTRIES", Some("100")),
+            ("MIDDLEWARE_CLIENT_IDLE_SECS", Some("30")),
+            ("MIDDLEWARE_SLOW_REQUEST_MS", Some("250")),
+            (
                 "MIDDLEWARE_CORS_ALLOWED_ORIGINS",
                 Some("https://a.example, https://b.example ,"),
             ),
@@ -435,6 +482,13 @@ fn middleware_overrides_are_applied() {
             assert_eq!(config.middleware.backpressure_queue, 4);
             assert_eq!(config.middleware.rate_limit_requests, 50);
             assert_eq!(config.middleware.rate_limit_period_secs, 2);
+            assert_eq!(config.middleware.trusted_proxies.len(), 3);
+            assert_eq!(config.middleware.client_max_concurrency, 4);
+            assert_eq!(config.middleware.client_rate_limit_requests, 20);
+            assert_eq!(config.middleware.client_rate_limit_period_secs, 2);
+            assert_eq!(config.middleware.client_max_entries, 100);
+            assert_eq!(config.middleware.client_idle_secs, 30);
+            assert_eq!(config.middleware.slow_request_ms, 250);
             assert!(config.middleware.hsts_enabled);
             assert_eq!(
                 config.middleware.cors_allowed_origins,
@@ -493,6 +547,12 @@ fn zero_middleware_capacity_is_rejected() {
         "MIDDLEWARE_BACKPRESSURE_QUEUE",
         "MIDDLEWARE_RATE_LIMIT_REQUESTS",
         "MIDDLEWARE_RATE_LIMIT_PERIOD_SECS",
+        "MIDDLEWARE_CLIENT_MAX_CONCURRENCY",
+        "MIDDLEWARE_CLIENT_RATE_LIMIT_REQUESTS",
+        "MIDDLEWARE_CLIENT_RATE_LIMIT_PERIOD_SECS",
+        "MIDDLEWARE_CLIENT_MAX_ENTRIES",
+        "MIDDLEWARE_CLIENT_IDLE_SECS",
+        "MIDDLEWARE_SLOW_REQUEST_MS",
     ] {
         with_env(
             &[("JWT_SECRET", Some(CUSTOM_SECRET)), (key, Some("0"))],
@@ -507,6 +567,41 @@ fn zero_middleware_capacity_is_rejected() {
             },
         );
     }
+}
+
+#[test]
+fn invalid_client_configuration_is_rejected() {
+    for value in ["*", "10.0.0.1/99", "not-an-ip"] {
+        with_env(
+            &[
+                ("JWT_SECRET", Some(CUSTOM_SECRET)),
+                ("MIDDLEWARE_TRUSTED_PROXIES", Some(value)),
+            ],
+            || {
+                assert!(
+                    AppConfig::from_env()
+                        .unwrap_err()
+                        .to_string()
+                        .contains("MIDDLEWARE_TRUSTED_PROXIES")
+                );
+            },
+        );
+    }
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("MIDDLEWARE_CLIENT_IDLE_SECS", Some("1")),
+            ("MIDDLEWARE_CLIENT_RATE_LIMIT_PERIOD_SECS", Some("2")),
+        ],
+        || {
+            assert!(
+                AppConfig::from_env()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("MIDDLEWARE_CLIENT_IDLE_SECS")
+            );
+        },
+    );
 }
 
 /// 脚手架只支持 SQLite：迁移文件与补列逻辑都依赖 SQLite 语法，其他后端必须启动即拒。

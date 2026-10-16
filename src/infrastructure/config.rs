@@ -2,6 +2,7 @@ use std::{env, net::SocketAddr, str::FromStr};
 
 use anyhow::{Context, Result, anyhow};
 use axum::http::HeaderValue;
+use ipnet::IpNet;
 use tracing_appender::rolling::Rotation;
 
 #[derive(Debug, Clone)]
@@ -68,7 +69,7 @@ pub struct LoggingConfig {
 /// HTTP 中间件容量参数，全部集中在 `.env`，业务代码不得内联这些数字。
 #[derive(Debug, Clone)]
 pub struct MiddlewareConfig {
-    /// 单个请求从进入服务到响应完成的整体超时（秒）。
+    /// 从进入请求保护层到响应头生成（含排队）的超时，响应流发送不在范围内。
     pub request_timeout_secs: u64,
     /// 请求体最大字节数。
     pub max_body_bytes: usize,
@@ -87,9 +88,25 @@ pub struct MiddlewareConfig {
     /// 空列表表示不下发任何 CORS 放行头；单元素为 `*` 表示放行所有来源。
     /// 条目在 `AppConfig::from_env` 阶段校验为合法 header 值。
     pub cors_allowed_origins: Vec<String>,
+    pub trusted_proxies: Vec<IpNet>,
+    pub client_max_concurrency: usize,
+    pub client_rate_limit_requests: u64,
+    pub client_rate_limit_period_secs: u64,
+    pub client_max_entries: usize,
+    pub client_idle_secs: u64,
+    pub slow_request_ms: u64,
 }
 
 impl AppConfig {
+    pub fn validate_runtime(&self) -> Result<()> {
+        if self.app_env.eq_ignore_ascii_case("production") && cfg!(debug_assertions) {
+            return Err(anyhow!(
+                "production requires a release build: debug authentication routes are unsafe"
+            ));
+        }
+        Ok(())
+    }
+
     pub fn from_env() -> Result<Self> {
         let app_name = get_env_or("APP_NAME", "axum-service-scaffold");
         let app_env = get_env_or("APP_ENV", "development");
@@ -199,6 +216,19 @@ impl AppConfig {
                 "MIDDLEWARE_CORS_ALLOWED_ORIGINS",
                 "",
             ))?,
+            trusted_proxies: parse_proxies(&get_env_or("MIDDLEWARE_TRUSTED_PROXIES", ""))?,
+            client_max_concurrency: parse_env_or("MIDDLEWARE_CLIENT_MAX_CONCURRENCY", 32_usize)?,
+            client_rate_limit_requests: parse_env_or(
+                "MIDDLEWARE_CLIENT_RATE_LIMIT_REQUESTS",
+                1024_u64,
+            )?,
+            client_rate_limit_period_secs: parse_env_or(
+                "MIDDLEWARE_CLIENT_RATE_LIMIT_PERIOD_SECS",
+                1_u64,
+            )?,
+            client_max_entries: parse_env_or("MIDDLEWARE_CLIENT_MAX_ENTRIES", 16384_usize)?,
+            client_idle_secs: parse_env_or("MIDDLEWARE_CLIENT_IDLE_SECS", 60_u64)?,
+            slow_request_ms: parse_env_or("MIDDLEWARE_SLOW_REQUEST_MS", 1000_u64)?,
         };
 
         if middleware.request_timeout_secs == 0
@@ -207,9 +237,21 @@ impl AppConfig {
             || middleware.backpressure_queue == 0
             || middleware.rate_limit_requests == 0
             || middleware.rate_limit_period_secs == 0
+            || middleware.client_max_concurrency == 0
+            || middleware.client_rate_limit_requests == 0
+            || middleware.client_rate_limit_period_secs == 0
+            || middleware.client_max_entries == 0
+            || middleware.client_idle_secs == 0
+            || middleware.slow_request_ms == 0
         {
             return Err(anyhow!(
                 "MIDDLEWARE capacity parameters must be greater than 0"
+            ));
+        }
+
+        if middleware.client_idle_secs < middleware.client_rate_limit_period_secs {
+            return Err(anyhow!(
+                "MIDDLEWARE_CLIENT_IDLE_SECS must be at least the client rate limit period"
             ));
         }
 
@@ -248,6 +290,19 @@ fn parse_origins(raw: &str) -> Result<Vec<String>> {
     }
 
     Ok(origins)
+}
+
+fn parse_proxies(raw: &str) -> Result<Vec<IpNet>> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .parse::<IpNet>()
+                .or_else(|_| value.parse::<std::net::IpAddr>().map(IpNet::from))
+                .map_err(|_| anyhow!("invalid MIDDLEWARE_TRUSTED_PROXIES entry: {value}"))
+        })
+        .collect()
 }
 
 fn parse_env_or<T>(key: &str, default: T) -> Result<T>
