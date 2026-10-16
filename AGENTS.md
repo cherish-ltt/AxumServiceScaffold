@@ -305,6 +305,8 @@ msrv = "1.99.0"
 
 ### 10.8 版本发布标签
 
+- 发版必须同步 `Cargo.toml`、`Cargo.lock` 中本包版本及 `src/api/dto/system.rs` 的
+  OpenAPI 版本示例，将 `docs/CHANGELOG.md` 的未发布内容归入带日期的版本章节，并更新 README。
 - 版本发布必须打 annotated tag（`git tag -a`），message 风格与历史保持一致
   （如 `v0.4.0`/`v0.3.0`）：首行 `vX.Y.Z <一句功能标题>`，随后逐条列出本次主要变更，
   末行 `详见 docs/CHANGELOG.md`。

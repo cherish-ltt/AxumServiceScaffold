@@ -94,6 +94,52 @@
 - `MIDDLEWARE_CORS_ALLOWED_ORIGINS`：生产环境应显式列出前端域名，不要用 `*`；
   留空表示服务不供浏览器跨域调用（同源与后端调用不受影响）。
 
+## 部署配置
+
+### 真实来源 IP 与 Nginx 透传
+
+- 用户直接连接服务：自动使用连接来源 IP，不需要配置代理；本机访问看到 `127.0.0.1` 属于正常情况。
+- 用户经过 Nginx 等代理：服务直接看到代理的 IP。本机代理通常是 `127.0.0.1`，
+  未配置透传与可信代理时，所有经过该代理的用户都会共用代理 IP 的额度。
+
+以「用户直接访问本机 Nginx，Nginx 再连接本服务」为例，在 Nginx 的 `server` 中加入：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $remote_addr;
+}
+```
+
+在本服务的 `.env` 中配置：
+
+```env
+MIDDLEWARE_TRUSTED_PROXIES=127.0.0.1/32
+```
+
+该示例覆盖用户自带的转发头，避免用户伪造 IP。服务仅信任配置中的代理，默认忽略转发头；
+没有转发头时仍使用代理 IP。若 Nginx 在其他机器或容器中，应填写服务实际看到的代理 IP/CIDR，
+而不是照抄 `127.0.0.1`。若前面还有 CDN/负载均衡器，需在边缘清除不可信转发头，后续可信
+代理正确追加来源，并显式配置可信代理链。不要直接信任所有地址或整个私网。
+
+本示例只说明 IP 透传，不是完整公网 Nginx 配置；TLS、连接保护及阻止绕过网关需另行配置。
+
+### 生产启动守卫
+
+它是一道防止误上线的启动检查，不是登录鉴权或防火墙。开发构建含可直接指定身份生成令牌的
+测试登录接口，因此 `APP_ENV=production` 时禁止运行开发构建：程序报错并停止启动。
+
+生产部署先在 `.env` 中设置 `APP_ENV=production`，替换示例 JWT 密钥，再执行：
+
+```bash
+cargo build --release
+./target/release/axum-service-scaffold
+```
+
+发布版本不提供开发登录和开发转账入口。`docs` feature 独立控制 Swagger，默认关闭；
+如生产显式启用，必须在网关限制文档访问。
+
 ## 生产保障边界
 
 - 生产配置必须运行 release 二进制；main 与 create_app 均拒绝 production + debug，
