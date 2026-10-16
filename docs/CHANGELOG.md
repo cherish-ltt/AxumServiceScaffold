@@ -7,26 +7,10 @@
 
 ## [Unreleased]
 
-### 新增
+## [0.7.0] - 2026-10-16
 
-- `MIDDLEWARE_TRUSTED_PROXIES` 支持单值 `*`，表示信任所有直连对端（等价于完全采信客户端自报的
-  X-Forwarded-For），仅适合本地调试；`*` 与具体条目混写会拒绝启动，生产环境下 `*` 或前缀长度
-  为 0 的网段（如 `0.0.0.0/0`）都会拒绝启动。
-
-### 文档与升级说明
-
-- `.env-example` 为客户端并发、速率、注册表容量与空闲保留期补齐逐项注释（含义、响应码与校验
-  约束），并说明可信代理的 `*` 语义与生产限制；`docs/MIDDLEWARE.md` 同步更新配置表格与部署章节。
-- `.env-example` 与 `.env` 统一为代码真实读取的全部配置项（40 项，含以注释形式给出的
-  `MIDDLEWARE_HSTS_ENABLED`），逐条补全校验约束与默认值说明，并修正与实现不符的描述
-  （`APP_ENV` 的实际启动校验范围、可信代理不使用 `X-Real-IP`）。同时移除模板中 27 项从未被
-  代码读取的配置项（`METRICS_*`、`HTTP_ALLOWED_HOSTS`、9 个 `MIDDLEWARE_*_ENABLED` 开关、
-  `SERVER_HTTP1_*`、`SHUTDOWN_TIMEOUT_SECS`、`LOG_FORMAT`、`LOG_MAX_FILE_BYTES`、
-  `MIDDLEWARE_HSTS_MAX_AGE_SECS` 等），避免照抄后误以为已生效。
-
-## [0.8.0] - 2026-10-16
-
-本版重点：不让单个来源轻易挤占服务资源，请求等待有期限，接口变慢时更容易定位原因。
+本版重点：不让单个来源轻易挤占服务资源，请求等待有期限，接口变慢时更容易定位原因；
+启动快照带版本号，配置模板与实现对齐。
 
 ### 新增
 
@@ -34,8 +18,15 @@
   取消释放许可，客户端限流返回 429（速率拒绝带 Retry-After），注册表满返回 503。
 - 显式 IP/CIDR 可信代理配置，X-Forwarded-For 从右向左解析；不可信对端的转发头不影响额度，
   IPv4 映射 IPv6 归一化，缺少 ConnectInfo 拒绝请求。访问日志增加 IP 并不再记录 query。
+  支持单值 `*` 信任所有直连对端，仅适合本地调试：生产环境下 `*` 或前缀长度为 0 的网段
+  都会拒绝启动，`*` 与具体条目混写也会拒绝启动。
 - 低噪声诊断：每请求一条访问或诊断日志，含路由模板、排队和数据库阶段耗时，
   慢请求、超时与业务 5xx 才输出阶段汇总，取消的阶段标记 interrupted。
+- **启动配置快照输出版本号**：`log_startup_config`（`src/logging.rs`）的 `application` 分组
+  在 `app_name` / `app_env` 之后增加 `version` 行，取值 `env!("CARGO_PKG_VERSION")`
+  （编译期取自 `Cargo.toml` 的 `version`），启动日志与日志文件都能看到本次运行的是哪个版本，
+  发版改 `Cargo.toml` 即自动生效，不需手工同步；`docs/LOGGING.md`「启动配置日志」同步说明，
+  `tests/logging_interval_tests.rs` 补对应用例（版本值用同一编译期来源比对）。
 
 ### 修复
 
@@ -53,16 +44,14 @@
 - 限额按 IP 而非用户账号分配，共享网络出口的用户共用额度；压测需同时调整客户端与全局限额。
 - 明确网关 TLS/连接层保护、多实例限额、SQLite、响应流及诊断精度的生产边界；
   超时不代表写入已回滚，不保证响应流发送期限。
-
-## [0.7.0] - 2026-10-14
-
-### 新增
-
-- **启动配置快照输出版本号**：`log_startup_config`（`src/logging.rs`）的 `application` 分组
-  在 `app_name` / `app_env` 之后增加 `version` 行，取值 `env!("CARGO_PKG_VERSION")`
-  （编译期取自 `Cargo.toml` 的 `version`），启动日志与日志文件都能看到本次运行的是哪个版本，
-  发版改 `Cargo.toml` 即自动生效，不需手工同步；`docs/LOGGING.md`「启动配置日志」同步说明，
-  `tests/logging_interval_tests.rs` 补对应用例（版本值用同一编译期来源比对）。
+- `.env-example` 为客户端并发、速率、注册表容量与空闲保留期补齐逐项注释（含义、响应码与校验
+  约束），并说明可信代理的 `*` 语义与生产限制；`docs/MIDDLEWARE.md` 同步更新配置表格与部署章节。
+- `.env-example` 与 `.env` 统一为代码真实读取的全部配置项（40 项，含以注释形式给出的
+  `MIDDLEWARE_HSTS_ENABLED`），逐条补全校验约束与默认值说明，并修正与实现不符的描述
+  （`APP_ENV` 的实际启动校验范围、可信代理不使用 `X-Real-IP`）。同时移除模板中 27 项从未被
+  代码读取的配置项（`METRICS_*`、`HTTP_ALLOWED_HOSTS`、9 个 `MIDDLEWARE_*_ENABLED` 开关、
+  `SERVER_HTTP1_*`、`SHUTDOWN_TIMEOUT_SECS`、`LOG_FORMAT`、`LOG_MAX_FILE_BYTES`、
+  `MIDDLEWARE_HSTS_MAX_AGE_SECS` 等），避免照抄后误以为已生效。
 
 ## [0.6.0] - 2026-10-13
 
