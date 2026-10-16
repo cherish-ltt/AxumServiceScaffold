@@ -51,6 +51,8 @@
   X-Forwarded-For，从右向左取第一个不可信地址；重复或参与解析的非法地址返回 400。
   不使用 X-Real-IP / Forwarded 兜底，网关必须覆盖或正确追加 X-Forwarded-For。
   例如本机代理设置 `MIDDLEWARE_TRUSTED_PROXIES=127.0.0.1/32,::1/128`，并阻止公网绕过网关。
+  单值 `*` 表示信任所有直连对端（等价于完全采信客户端自报的 X-Forwarded-For），
+  仅用于本地调试：生产环境遇到前缀长度为 0 的条目会拒绝启动，且 `*` 不得与具体条目混写。
   自定义启动入口必须注入 ConnectInfo；缺少真实对端信息返回 500，不合成一个假 IP。
 
 ## 中间件配置
@@ -68,7 +70,7 @@
 | `MIDDLEWARE_RATE_LIMIT_PERIOD_SECS` | `1` | 限流周期长度（秒） |
 | `MIDDLEWARE_HSTS_ENABLED` | 跟随 `APP_ENV` | 生产环境默认下发 `HSTS`，开发环境默认关闭 |
 | `MIDDLEWARE_CORS_ALLOWED_ORIGINS` | 空 | 允许跨域的来源白名单，逗号分隔；留空不下发任何 CORS 头，单值 `*` 放行全部来源 |
-| `MIDDLEWARE_TRUSTED_PROXIES` | 空 | 显式可信代理 IP/CIDR，逗号分隔 |
+| `MIDDLEWARE_TRUSTED_PROXIES` | 空 | 显式可信代理 IP/CIDR，逗号分隔；单值 `*` 信任所有直连对端（生产环境拒绝启动，且不得与具体条目混写） |
 | `MIDDLEWARE_CLIENT_MAX_CONCURRENCY` | `32` | 单 IP 在途请求（含全局排队）上限 |
 | `MIDDLEWARE_CLIENT_RATE_LIMIT_REQUESTS` | `1024` | 单 IP 每窗口请求数上限 |
 | `MIDDLEWARE_CLIENT_RATE_LIMIT_PERIOD_SECS` | `1` | 客户端固定窗口长度 |
@@ -121,7 +123,8 @@ MIDDLEWARE_TRUSTED_PROXIES=127.0.0.1/32
 该示例覆盖用户自带的转发头，避免用户伪造 IP。服务仅信任配置中的代理，默认忽略转发头；
 没有转发头时仍使用代理 IP。若 Nginx 在其他机器或容器中，应填写服务实际看到的代理 IP/CIDR，
 而不是照抄 `127.0.0.1`。若前面还有 CDN/负载均衡器，需在边缘清除不可信转发头，后续可信
-代理正确追加来源，并显式配置可信代理链。不要直接信任所有地址或整个私网。
+代理正确追加来源，并显式配置可信代理链。不要直接信任所有地址或整个私网：
+单值 `*` 只用于本地调试（生产环境会拒绝启动），而不是省事的部署方案。
 
 本示例只说明 IP 透传，不是完整公网 Nginx 配置；TLS、连接保护及阻止绕过网关需另行配置。
 
