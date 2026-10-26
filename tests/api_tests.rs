@@ -9,8 +9,13 @@ use axum_service_scaffold::create_app::create_app;
 use axum_service_scaffold::infrastructure::config::{
     AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, MiddlewareConfig, ServerConfig,
 };
+use axum_service_scaffold::infrastructure::databases::{connect_database, run_migrations};
+use axum_service_scaffold::infrastructure::repositories::transaction::{
+    SeaOrmTransferRepository, TransferRepository,
+};
 use chrono::{Duration, Utc};
 use http_body_util::BodyExt;
+use ipnet::IpNet;
 use jsonwebtoken::{Algorithm, EncodingKey, Header as JwtHeader, encode};
 use serde_json::{Value, json};
 use tower::ServiceExt;
@@ -21,11 +26,24 @@ const TEST_JWT_SECRET: &str = "api-test-secret-that-is-long-enough";
 
 /// 每个测试独立装配一套容器与临时 SQLite 数据库，互不干扰。
 async fn setup_app() -> Router {
-    setup_app_with_cors_origins(vec!["https://example.com".to_string()]).await
+    setup_app_with_config(vec!["https://example.com".to_string()], Vec::new(), 2).await
+}
+
+/// 指定可信代理的装配入口：只有命中该列表的对端才会被采信 X-Forwarded-For。
+async fn setup_app_with_trusted_proxies(trusted_proxies: Vec<IpNet>) -> Router {
+    setup_app_with_config(vec!["https://example.com".to_string()], trusted_proxies, 2).await
 }
 
 /// 与 `setup_app` 相同，但可指定 CORS 来源白名单。
 async fn setup_app_with_cors_origins(cors_allowed_origins: Vec<String>) -> Router {
+    setup_app_with_config(cors_allowed_origins, Vec::new(), 2).await
+}
+
+async fn setup_app_with_config(
+    cors_allowed_origins: Vec<String>,
+    trusted_proxies: Vec<IpNet>,
+    max_connections: u32,
+) -> Router {
     let database_url = format!(
         "sqlite://{}?mode=rwc",
         std::env::temp_dir()
@@ -43,7 +61,7 @@ async fn setup_app_with_cors_origins(cors_allowed_origins: Vec<String>) -> Route
         database: DatabaseConfig {
             url: database_url,
             min_connections: 1,
-            max_connections: 2,
+            max_connections,
             connect_timeout_secs: 5,
             idle_secs: 30,
             sqlx_logging: false,
@@ -76,7 +94,7 @@ async fn setup_app_with_cors_origins(cors_allowed_origins: Vec<String>) -> Route
             rate_limit_period_secs: 1,
             hsts_enabled: false,
             cors_allowed_origins,
-            trusted_proxies: Vec::new(),
+            trusted_proxies,
             client_max_concurrency: 32,
             client_rate_limit_requests: 1024,
             client_rate_limit_period_secs: 1,
@@ -469,6 +487,37 @@ async fn openapi_document_is_served() {
     );
 }
 
+/// 客户端识别失败是请求输入错误，走 400；保护层不引入 403（见 docs/MIDDLEWARE.md）。
+///
+/// 只有真实对端命中 `MIDDLEWARE_TRUSTED_PROXIES` 才会解析 X-Forwarded-For，
+/// 因此这里必须显式把 127.0.0.1 配成可信代理，否则该头被忽略、请求照常 200。
+#[tokio::test]
+async fn invalid_forwarded_for_returns_400_not_403() {
+    let app = setup_app_with_trusted_proxies(vec!["127.0.0.1/32".parse().unwrap()]).await;
+    let mut request = get("/api/v1/system/health");
+    request
+        .headers_mut()
+        .insert("x-forwarded-for", "unknown".parse().unwrap());
+    let (status, body) = send(app, request).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], 400);
+    assert!(body["timestamp"].is_number());
+}
+
+/// 未配置可信代理时转发头被忽略，不能凭它改变身份或触发 400。
+#[tokio::test]
+async fn forwarded_for_is_ignored_when_no_proxy_is_trusted() {
+    let app = setup_app().await;
+    let mut request = get("/api/v1/system/health");
+    request
+        .headers_mut()
+        .insert("x-forwarded-for", "unknown".parse().unwrap());
+    let (status, _) = send(app, request).await;
+
+    assert_eq!(status, StatusCode::OK);
+}
+
 #[tokio::test]
 async fn unknown_route_returns_404() {
     let app = setup_app().await;
@@ -634,6 +683,111 @@ async fn transfer_rejects_unknown_account_with_404() {
     let (status, _) = send(app, post_json_with_bearer(DEV_TRANSFER, &token, payload)).await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// 同一账户的并发转账不会双花。
+///
+/// BEGIN IMMEDIATE 在事务开始时就拿写锁，并发写事务实际被串行化，因此 HTTP 层不会出现
+/// 「读到同一版本再各写一次」的交错（乐观锁冲突见 `stale_version_returns_conflict`）。
+/// 这里锁定对外可见的结论：无论调度顺序如何，每笔转账都记一次账，余额与流水严格对应。
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn concurrent_transfers_never_double_spend() {
+    let app = setup_app_with_config(vec!["https://example.com".to_string()], Vec::new(), 4).await;
+    let token = issue_dev_token(&app).await;
+
+    let mut handles = Vec::new();
+    for (index, amount) in [20000_i64, 30000].into_iter().enumerate() {
+        let app = app.clone();
+        let token = token.clone();
+        handles.push(tokio::spawn(async move {
+            send(
+                app,
+                post_json_with_bearer(
+                    DEV_TRANSFER,
+                    &token,
+                    transfer_body_with_request_id(amount, &format!("req-c-{index}")),
+                ),
+            )
+            .await
+        }));
+    }
+
+    let mut committed = 0_i64;
+    for handle in handles {
+        let (status, body) = handle.await.expect("并发请求不应 panic");
+        assert_eq!(status, StatusCode::OK, "额度充足时并发转账都应成功: {body}");
+        committed += body["data"]["amount_cents"].as_i64().expect("返回金额");
+    }
+    assert_eq!(committed, 50000);
+
+    // 流水条数与成功笔数一致，说明没有丢写。
+    let (status, list) = send(app.clone(), get_with_bearer("/api/v1/transactions", &token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["data"]["total"], 2);
+
+    // 再转 1 分反证余额：100000 - 50000 - 1 = 49999。
+    let (status, probe) = send(
+        app,
+        post_json_with_bearer(DEV_TRANSFER, &token, transfer_body(1)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        probe["data"]["from_balance_after_cents"],
+        100000 - 50000 - 1
+    );
+}
+
+/// 读到旧版本后再写回必须 409，而不是静默覆盖。
+///
+/// IMMEDIATE 事务把 HTTP 并发串行化了，无法从接口层制造「读到同一版本」的交错，
+/// 因此直接驱动仓储：两个连接拿到同一快照，后写的一方必须被拒绝。
+#[tokio::test]
+async fn stale_version_returns_conflict() {
+    let repository = SeaOrmTransferRepository;
+    let database_url = format!(
+        "sqlite://{}?mode=rwc",
+        std::env::temp_dir()
+            .join(format!("axum-scaffold-stale-{}.db", Uuid::now_v7()))
+            .display()
+    );
+    let database = connect_database(&DatabaseConfig {
+        url: database_url.clone(),
+        min_connections: 1,
+        max_connections: 4,
+        connect_timeout_secs: 5,
+        idle_secs: 30,
+        sqlx_logging: false,
+    })
+    .await
+    .expect("连接测试数据库");
+    run_migrations(&database, &database_url)
+        .await
+        .expect("执行迁移与播种");
+
+    let snapshot = repository
+        .find_account(&database, "acc_alice")
+        .await
+        .expect("查询账户")
+        .expect("演示账户已播种");
+
+    let mut first = snapshot.clone();
+    first.balance_cents -= 1000;
+    first.version += 1;
+    repository
+        .update_account_balance(&database, &first, snapshot.version)
+        .await
+        .expect("首次条件更新应成功");
+
+    let mut second = snapshot.clone();
+    second.balance_cents -= 2000;
+    second.version += 1;
+    let error = repository
+        .update_account_balance(&database, &second, snapshot.version)
+        .await
+        .expect_err("过期版本必须被拒绝");
+    assert_eq!(error.http_code(), 409);
 }
 
 /// 调试开关：事务内写入全部完成后强制失败，回滚必须让数据库回到原状。
