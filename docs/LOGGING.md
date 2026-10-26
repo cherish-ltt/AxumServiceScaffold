@@ -74,6 +74,8 @@ rg 'request diagnostic|route="/api/v1/transactions/\{id\}"' log/
 - 打印时机在日志初始化之后、`Container::bootstrap` 之前（`src/main.rs`），
   因此数据库引导失败时也能看到配置快照。
 
-`.env-example` 是入库的示例文件，其中的容量参数与 [中间件配置](MIDDLEWARE.md) 的默认值保持一致
-（`MIDDLEWARE_MAX_CONCURRENCY=256`、`MIDDLEWARE_BACKPRESSURE_QUEUE=256`、
-`MIDDLEWARE_RATE_LIMIT_REQUESTS=32768`）；两者不一致时以启动日志打印的实际值为准。
+`.env-example` 是入库的示例文件，其中生效的配置项与代码读取的变量一一对应
+（由 `tests/config_template_tests.rs` 守护，不再在文档里写死数量），容量参数与
+[中间件配置](MIDDLEWARE.md) 的默认值保持一致（`MIDDLEWARE_MAX_CONCURRENCY=256`、
+`MIDDLEWARE_BACKPRESSURE_QUEUE=256`、`MIDDLEWARE_RATE_LIMIT_REQUESTS=32768`）；
+两者不一致时以启动日志打印的实际值为准。
