@@ -33,13 +33,15 @@ pub async fn root(
     Ok(ApiResponse::ok(welcome.into()))
 }
 
+/// 进程存活检查：只证明进程还能响应 HTTP，不查询数据库。
+///
+/// 依赖就绪请用 `/api/v1/system/ready`（数据库不可用时返回 503），因此这里只声明 200。
 #[cfg_attr(feature = "docs", utoipa::path(
     get,
     path = "/api/v1/system/health",
     tag = "System",
     responses(
-        (status = 200, description = "Health check passed", body = DocHealthResponse),
-        (status = 503, description = "Service degraded or database unavailable", body = DocHealthResponse)
+        (status = 200, description = "Process is alive; readiness is reported by /api/v1/system/ready", body = DocHealthResponse)
     )
 ))]
 pub async fn health(
