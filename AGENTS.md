@@ -268,6 +268,9 @@ msrv = "1.99.0"
   中间件代码中不得出现字面量。新增参数必须同步 `.env`、`.env-example`、`tests/config_tests.rs`。
 - 代码兜底默认值必须与 `.env-example` 保持一致（当前：并发 256、背压队列 256、限流 32768 req/s、
   超时 10s、Body 2 MiB、周期 1s）；修改任一侧都必须同步另一侧与 `docs/MIDDLEWARE.md` 的「中间件配置」表格。
+- 客户端识别失败的状态码固定为 400 / 500，**不使用 403**（输入错误 vs 入口装配错误）；其余保护
+  拒绝为 429（含 Retry-After 的速率拒绝）、503。调整语义必须同步 `docs/MIDDLEWARE.md`、
+  `docs/RESPONSE.md`、`tests/middleware_tests.rs` 与 `tests/api_tests.rs`。
 - 中间件的错误响应必须复用 `ApiResponse::error(status, message)`，与业务错误 `AppError`
   的响应格式保持一致；不要在中间件里手写 JSON。
 - 并发限制与限速是两个维度：并发限制约束在途请求数，限速约束单位时间请求数；
@@ -298,7 +301,8 @@ msrv = "1.99.0"
   保证「条数」计数与日志行一一对应，禁止直接计数 fmt 层的分段写入。
 - 进程退出时必须停止定时刷盘线程并落盘剩余缓冲（`BatchGuard::drop`），不得丢日志。
 - 批量参数属于日志配置（`LoggingConfig`），走 `.env`；新增/调整时必须同步 `.env`、
-  `.env-example`、`tests/config_tests.rs`（默认值、覆盖项、0 值校验）、`docs/LOGGING.md` 的
+  `.env-example`、`tests/config_tests.rs`（默认值、覆盖项、0 值校验）、`tests/config_template_tests.rs`
+  （`config.rs` 读取的变量与模板一致）、`docs/LOGGING.md` 的
   「日志写入：分批落盘」章节与 `docs/CHANGELOG.md`；任一项为 `0` 拒绝启动。
 - 依赖约束：`tracing-subscriber`、`tracing-appender` 为正式依赖，不得为分批写入引入
   额外的异步通道/缓冲依赖（用 `std::thread` + `std::sync::mpsc` 实现定时刷盘）。
