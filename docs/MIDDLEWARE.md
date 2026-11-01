@@ -17,7 +17,7 @@
 | 顺序 | 中间件 | 解决的问题 | 失败响应 |
 | --- | --- | --- | --- |
 | 1 | 请求 ID 校验 / `SetRequestIdLayer` | 只保留 1–64 字节的字母、数字、`-_.` ID，其余替换为 UUID | — |
-| 2 | `PropagateRequestIdLayer` | 回写请求 ID | — |
+| 2 | `PropagateRequestIdLayer` / CORS 响应处理 | 回写请求 ID，按同一白名单为保护层响应添加跨域头 | — |
 | 3 | 客户端识别 | 读取 TCP 对端，解析显式可信代理链 | 后续保护层返回 400 / 500 |
 | 4 | 安全响应头 | nosniff / DENY / Referrer-Policy / 可选 HSTS，覆盖超时响应 | — |
 | 5 | 请求观测与总超时 | 创建请求 span，计时含排队；统一框架错误，输出一条访问或诊断日志 | 408 JSON |
@@ -44,6 +44,7 @@
   handler 日志和响应头可以对齐。转发链和原始非法 ID 不写入访问日志。
 - 中间件产生的错误统一走 `ApiResponse` 结构（`src/middleware/error_response.rs`），
   与业务错误 `AppError` 的响应格式一致。
+- 预检仍经过客户端及全局保护；允许来源的响应向浏览器暴露 `Retry-After` 与 `x-request-id`。
 - **客户端额度**：在全局队列之前按规范化 IP 分配并发与固定窗口速率额度，跨路由共享；
   同一 NAT 出口共用额度。拒绝请求不排队，速率超限带 Retry-After；并发超限不猜测重试时间。
   注册表满时新来源返回 503；活动项不驱逐，空闲项定期清理，不依赖无限增长的 IP 缓存。
