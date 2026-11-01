@@ -424,14 +424,48 @@ async fn echo_rejects_blank_title() {
 #[tokio::test]
 async fn list_examples_applies_filters() {
     let app = setup_app().await;
-    let (status, body) = send(app, get("/api/v1/examples?page=2&size=3&keyword=Swagger")).await;
+    let (status, body) = send(app, get("/api/v1/examples?page=1&size=3&keyword=Swagger")).await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["data"]["page"], 2);
+    assert_eq!(body["data"]["page"], 1);
     assert_eq!(body["data"]["size"], 3);
     assert_eq!(body["data"]["keyword"], "Swagger");
     assert_eq!(body["data"]["items"].as_array().map(Vec::len), Some(1));
     assert_eq!(body["data"]["items"][0]["id"], "example_003");
+}
+
+#[tokio::test]
+async fn list_examples_pages_after_filtering() {
+    let app = setup_app().await;
+    for (page, expected) in [
+        (1, Some("example_001")),
+        (2, Some("example_002")),
+        (3, Some("example_003")),
+        (4, None),
+    ] {
+        let (status, body) = send(
+            app.clone(),
+            get(&format!("/api/v1/examples?page={page}&size=1")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["page"], page);
+        assert_eq!(body["data"]["size"], 1);
+        let items = body["data"]["items"].as_array().unwrap();
+        assert_eq!(items.first().and_then(|item| item["id"].as_str()), expected);
+        assert_eq!(items.len(), usize::from(expected.is_some()));
+    }
+    for (query, expected) in [
+        ("page=1&size=1&keyword=sample", Some("example_002")),
+        ("page=2&size=1&keyword=sample", Some("example_003")),
+        ("page=1&size=1&keyword=missing", None),
+    ] {
+        let (status, body) = send(app.clone(), get(&format!("/api/v1/examples?{query}"))).await;
+        assert_eq!(status, StatusCode::OK);
+        let items = body["data"]["items"].as_array().unwrap();
+        assert_eq!(items.first().and_then(|item| item["id"].as_str()), expected);
+        assert_eq!(items.len(), usize::from(expected.is_some()));
+    }
 }
 
 #[tokio::test]
