@@ -430,21 +430,56 @@ fn invalid_server_port_is_rejected() {
 
 #[test]
 fn socket_addr_parses_valid_host() {
-    let server = ServerConfig {
-        host: "127.0.0.1".to_string(),
-        port: 8080,
-    };
-    let address = server.socket_addr().expect("合法地址应可解析");
-    assert_eq!(address.to_string(), "127.0.0.1:8080");
+    for (host, ip) in [
+        ("127.0.0.1", "127.0.0.1"),
+        ("0.0.0.0", "0.0.0.0"),
+        ("::1", "::1"),
+        ("::", "::"),
+        ("[::1]", "::1"),
+    ] {
+        for port in [0, 8080] {
+            let address = ServerConfig {
+                host: host.to_string(),
+                port,
+            }
+            .socket_addr()
+            .unwrap();
+            assert_eq!(address.ip(), ip.parse::<IpAddr>().unwrap());
+            assert_eq!(address.port(), port);
+        }
+    }
 }
 
 #[test]
 fn socket_addr_rejects_invalid_host() {
-    let server = ServerConfig {
-        host: "invalid host".to_string(),
-        port: 8080,
-    };
-    assert!(server.socket_addr().is_err());
+    for host in [
+        "invalid host",
+        "",
+        "127.0.0.1:80",
+        "[::1]:80",
+        "localhost",
+        "[127.0.0.1]",
+    ] {
+        let server = ServerConfig {
+            host: host.to_string(),
+            port: 8080,
+        };
+        assert!(server.socket_addr().is_err(), "{host}");
+        with_env(
+            &[
+                ("JWT_SECRET", Some(CUSTOM_SECRET)),
+                ("SERVER_HOST", Some(host)),
+            ],
+            || {
+                assert!(
+                    AppConfig::from_env()
+                        .unwrap_err()
+                        .to_string()
+                        .contains("SERVER_HOST")
+                );
+            },
+        );
+    }
 }
 
 #[test]
