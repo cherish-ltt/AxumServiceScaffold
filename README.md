@@ -44,7 +44,7 @@ clone 下来即可跑通。
 - **洋葱架构骨架**：四层加装配层，参考实现可直接照抄扩展
 - **统一响应结构**：`{code, message, data?, timestamp}`，见 [统一响应结构](docs/RESPONSE.md)
 - **HTTP 生产保护栈**：请求 ID / 安全响应头 / CORS 白名单 / 背压 / 限流 / 含排队超时 / Body 限制 / 压缩 / panic 隔离，
-  参数集中在 `.env`，见 [中间件栈与配置](docs/MIDDLEWARE.md)
+  参数集中在 `.env`，Body 限制同时作用于流式读取和提取器，见 [中间件栈与配置](docs/MIDDLEWARE.md)
 - **客户端保护**：按可信来源 IP 独立限并发、限请求量，显式可信代理与有界客户端注册表；共享出口共用额度
 - **事务示例**：一次转账完整演示「启动事务 → 读写数据 → 提交 / 回滚」，见 [事务示例](docs/TRANSACTION.md)
 - **JWT 鉴权**：调试登录与当前用户解析，OpenAPI 文档与 Swagger UI 由 `docs` feature 提供（默认关闭，release 也可显式启用）

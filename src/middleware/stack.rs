@@ -4,6 +4,7 @@ use axum::{
     Router,
     body::Body,
     error_handling::HandleErrorLayer,
+    extract::DefaultBodyLimit,
     http::{HeaderName, HeaderValue, header},
     response::Response,
 };
@@ -38,7 +39,9 @@ const REQUEST_ID_HEADER: &str = "x-request-id";
 /// 必须包住整个 Router，不能用 `Router::layer`：后者会把有状态中间件逐路由复制一份，
 /// 全局并发上限与全局限流会因此失效。
 pub fn apply(app: Router, config: &MiddlewareConfig) -> Router {
-    let app = app.route_layer(axum::middleware::from_fn(diagnostics::route));
+    let app = app
+        .route_layer(axum::middleware::from_fn(diagnostics::route))
+        .layer(DefaultBodyLimit::max(config.max_body_bytes));
     let stack = ServiceBuilder::new()
         .layer(axum::middleware::from_fn(client_ip::sanitize_request_id))
         .layer(SetRequestIdLayer::new(request_id_header(), MakeRequestUuid))
