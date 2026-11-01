@@ -477,6 +477,111 @@ fn mask_secret(secret: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(all(
+        any(target_os = "macos", target_os = "linux"),
+        target_pointer_width = "64"
+    ))]
+    #[test]
+    fn partial_file_writes_recover_without_duplicate_bytes() {
+        #[repr(C)]
+        struct Limit {
+            current: u64,
+            maximum: u64,
+        }
+        unsafe extern "C" {
+            fn getrlimit(resource: i32, limit: *mut Limit) -> i32;
+            fn setrlimit(resource: i32, limit: *const Limit) -> i32;
+        }
+
+        const CHILD: &str = "SCAFFOLD_PARTIAL_WRITE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new("sh")
+                .arg("-c")
+                .arg("trap '' XFSZ; exec \"$1\" --exact logging::tests::partial_file_writes_recover_without_duplicate_bytes --nocapture")
+                .arg("sh")
+                .arg(std::env::current_exe().unwrap())
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        let first = b"first-event-abcdefghijklmnopqrstuvwxyz0123456789\n";
+        let second = b"second-event-abcdefghijklmnopqrstuvwxyz0123456789\n";
+        let later = b"later-event\n";
+        for (limit, recovery) in [(0, 0), (64, 1), (first.len() as u64, 2)] {
+            let dir = std::env::temp_dir().join(format!("log-partial-{}", uuid::Uuid::now_v7()));
+            let appender = RollingFileAppender::builder()
+                .rotation(tracing_appender::rolling::Rotation::NEVER)
+                .filename_prefix("test")
+                .build(&dir)
+                .unwrap();
+            let writer = BatchFileWriter::new(appender, 1, Duration::from_millis(20));
+            let mut original = Limit {
+                current: 0,
+                maximum: 0,
+            };
+            // SAFETY: Both pointers reference valid limits, and only this child process is constrained.
+            unsafe {
+                assert_eq!(getrlimit(1, &mut original), 0);
+                assert_eq!(
+                    setrlimit(
+                        1,
+                        &Limit {
+                            current: limit,
+                            maximum: original.maximum
+                        }
+                    ),
+                    0
+                );
+            }
+            let payload = [first.as_slice(), second.as_slice()].concat();
+            writer.make_writer().write_all(&payload).unwrap();
+            assert!(writer.state.lock().unwrap().failing);
+            writer.make_writer().write_all(later).unwrap();
+            let path = std::fs::read_dir(&dir)
+                .unwrap()
+                .next()
+                .unwrap()
+                .unwrap()
+                .path();
+            assert_eq!(std::fs::read(&path).unwrap(), &payload[..limit as usize]);
+            assert_eq!(
+                writer.state.lock().unwrap().buf,
+                [payload[limit as usize..].as_ref(), later].concat()
+            );
+            // SAFETY: The saved limit came from getrlimit and the hard limit was not changed.
+            unsafe { assert_eq!(setrlimit(1, &original), 0) };
+            match recovery {
+                0 => writer.flush().unwrap(),
+                1 => {
+                    let guard = writer.start_flusher();
+                    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                    while writer.state.lock().unwrap().failing
+                        && std::time::Instant::now() < deadline
+                    {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    assert!(!writer.state.lock().unwrap().failing);
+                    drop(guard);
+                },
+                _ => drop(writer.start_flusher()),
+            }
+            assert_eq!(
+                std::fs::read(path).unwrap(),
+                [payload.as_slice(), later].concat()
+            );
+            drop(writer);
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
     #[test]
     fn retained_logs_are_written_after_recovery() {
         let dir = std::env::temp_dir().join(format!("log-recovery-{}", uuid::Uuid::now_v7()));
