@@ -804,9 +804,7 @@ async fn stale_version_returns_conflict() {
     })
     .await
     .expect("连接测试数据库");
-    run_migrations(&database, &database_url)
-        .await
-        .expect("执行迁移与播种");
+    run_migrations(&database).await.expect("执行迁移与播种");
 
     let snapshot = repository
         .find_account(&database, "acc_alice")
