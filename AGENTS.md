@@ -266,6 +266,7 @@ msrv = "1.99.0"
   也不得当作业务任务队列使用。
 - 容量参数只允许定义在 `MiddlewareConfig`（`src/infrastructure/config.rs`）并从 `.env` 读取；
   中间件代码中不得出现字面量。新增参数必须同步 `.env`、`.env-example`、`tests/config_tests.rs`。
+- Axum 提取器的 Body 限制必须与全局 `RequestBodyLimitLayer` 使用同一配置值。
 - 代码兜底默认值必须与 `.env-example` 保持一致（当前：并发 256、背压队列 256、限流 32768 req/s、
   超时 10s、Body 2 MiB、周期 1s）；修改任一侧都必须同步另一侧与 `docs/MIDDLEWARE.md` 的「中间件配置」表格。
 - 客户端识别失败的状态码固定为 400 / 500，**不使用 403**（输入错误 vs 入口装配错误）；其余保护
@@ -300,7 +301,9 @@ msrv = "1.99.0"
   落盘一次，降低高频场景下逐条写文件的 CPU 开销；控制台层保持实时输出，不得加入缓冲。
 - 每条日志必须先格式化为完整一行再写入缓冲（`LineFormat` 包一层 `FormatEvent`），
   保证「条数」计数与日志行一一对应，禁止直接计数 fmt 层的分段写入。
-- 进程退出时必须停止定时刷盘线程并落盘剩余缓冲（`BatchGuard::drop`），不得丢日志。
+- 进程退出时必须停止定时刷盘线程并尝试落盘剩余缓冲（`BatchGuard::drop`）；磁盘故障时不能保证不丢日志。
+- 文件缓冲最多 2 MiB，空间不足时丢弃新事件并计数；写入失败、丢弃和恢复通过标准错误报告，不能递归写入文件日志。
+- 部分写入失败后只能重试尚未写入的字节；回归测试须用真实文件验证故障恢复后的内容及顺序。
 - 批量参数属于日志配置（`LoggingConfig`），走 `.env`；新增/调整时必须同步 `.env`、
   `.env-example`、`tests/config_tests.rs`（默认值、覆盖项、0 值校验）、`tests/config_template_tests.rs`
   （`config.rs` 读取的变量与模板一致）、`docs/LOGGING.md` 的
@@ -394,6 +397,7 @@ msrv = "1.99.0"
 - `code` 由 HTTP 状态码派生，唯一真值是 `ApiResponse` 内部私有的 `status: StatusCode`；禁止引入能独立设置 `code` 的构造入口。
 - 需要非 200 语义时使用 `ApiResponse::with_status(StatusCode, message, data)`，不要新增绕过状态码的构造器。
 - controller 直接返回 `ApiResponse<T>`（已实现 `IntoResponse`），不要再手动包裹 `Json`。
+- 响应序列化失败时返回统一的安全 500 JSON，错误详情仅写入服务端日志。
 - `204 No Content` 等不带响应体的状态码不属于 `ApiResponse` 职责，由 handler 直接返回 `StatusCode`。
 - `domain` 层不引入 `http::StatusCode`，错误状态码仍以 `AppError::http_code() -> u16` 表达，在外层 `src/error.rs` 才映射为 `StatusCode`。
 - 修改响应结构时必须同步更新 `docs/RESPONSE.md` 的「统一响应结构」章节与 `docs/CHANGELOG.md`。
