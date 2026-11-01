@@ -363,6 +363,10 @@ msrv = "1.99.0"
 
 ## 10. 其他追加内容
 
+### 10.12 监听地址
+
+- `SERVER_HOST` 接受 IPv4 或 IPv6 字面量（兼容带方括号的 IPv6），配置加载时验证，不解析域名或接受额外端口。
+
 ### 10.1 测试组织与覆盖率
 
 - 单元测试直接写在源码文件的 `#[cfg(test)] mod tests` 模块中（如 `src/error.rs`、`src/util/password.rs`）。

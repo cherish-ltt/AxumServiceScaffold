@@ -29,6 +29,55 @@ async fn setup_app() -> Router {
     setup_app_with_config(vec!["https://example.com".to_string()], Vec::new(), 2).await
 }
 
+#[tokio::test]
+async fn ipv6_loopback_serves_health() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let address = ServerConfig {
+        host: "::1".to_string(),
+        port: 0,
+    }
+    .socket_addr()
+    .unwrap();
+    let listener = match tokio::net::TcpListener::bind(address).await {
+        Ok(listener) => listener,
+        Err(error)
+            if error.kind() == std::io::ErrorKind::AddrNotAvailable
+                || error.kind() == std::io::ErrorKind::Unsupported =>
+        {
+            eprintln!("IPv6 loopback unavailable: {error}");
+            return;
+        },
+        Err(error) => panic!("IPv6 loopback bind failed: {error}"),
+    };
+    let address = listener.local_addr().unwrap();
+    let app = setup_app().await;
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    stream
+        .write_all(
+            b"GET /api/v1/system/health HTTP/1.1\r\nHost: [::1]\r\nConnection: close\r\n\r\n",
+        )
+        .await
+        .unwrap();
+    let mut response = String::new();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        stream.read_to_string(&mut response),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    server.abort();
+}
+
 /// 指定可信代理的装配入口：只有命中该列表的对端才会被采信 X-Forwarded-For。
 async fn setup_app_with_trusted_proxies(trusted_proxies: Vec<IpNet>) -> Router {
     setup_app_with_config(vec!["https://example.com".to_string()], trusted_proxies, 2).await

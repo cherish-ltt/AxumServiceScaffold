@@ -95,6 +95,8 @@ DATABASE_URL=sqlite://scaffold.db?mode=rwc
 
 ### 2. 启动服务
 
+`SERVER_HOST` 使用 IPv4 或 IPv6 字面量（如 `127.0.0.1`、`::1`），端口单独由 `SERVER_PORT` 配置。
+
 ```bash
 cargo run
 ```

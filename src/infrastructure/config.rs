@@ -28,10 +28,16 @@ pub struct ServerConfig {
 
 impl ServerConfig {
     pub fn socket_addr(&self) -> Result<SocketAddr> {
-        let address = format!("{}:{}", self.host, self.port);
-        address
-            .parse::<SocketAddr>()
-            .with_context(|| format!("failed to parse server listen address: {address}"))
+        if self.host.starts_with('[') {
+            return format!("{}:{}", self.host, self.port)
+                .parse::<SocketAddr>()
+                .with_context(|| format!("invalid SERVER_HOST: {}", self.host));
+        }
+        let ip = self
+            .host
+            .parse::<IpAddr>()
+            .with_context(|| format!("invalid SERVER_HOST: {}", self.host))?;
+        Ok(SocketAddr::new(ip, self.port))
     }
 }
 
@@ -119,6 +125,7 @@ impl AppConfig {
             host: get_env_or("SERVER_HOST", "127.0.0.1"),
             port: parse_env_or("SERVER_PORT", 8080u16)?,
         };
+        server.socket_addr()?;
 
         let database = DatabaseConfig {
             url: get_env_or("DATABASE_URL", "sqlite://scaffold.db?mode=rwc"),
