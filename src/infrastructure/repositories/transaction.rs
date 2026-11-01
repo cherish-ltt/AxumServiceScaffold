@@ -306,9 +306,7 @@ mod tests {
         let database = Database::connect(url.clone())
             .await
             .expect("连接临时数据库");
-        run_migrations(&database, &url)
-            .await
-            .expect("执行迁移与播种成功");
+        run_migrations(&database).await.expect("执行迁移与播种成功");
 
         database
     }

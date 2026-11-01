@@ -110,6 +110,7 @@ reqwest = { version = "=0.13.5", default-features = false, features = [
   "rustls",
 ], optional = true }
 uuid = { version = "=1.27.0", features = ["v7"] }
+url = "=2.5.8"
 
 # ExtendTool
 derive_more = { version = "=2.1.1", optional = true }

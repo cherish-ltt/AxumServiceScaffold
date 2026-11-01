@@ -44,6 +44,21 @@ async fn setup_app_with_config(
     trusted_proxies: Vec<IpNet>,
     max_connections: u32,
 ) -> Router {
+    setup_app_with_body_limit(
+        cors_allowed_origins,
+        trusted_proxies,
+        max_connections,
+        2 * 1024 * 1024,
+    )
+    .await
+}
+
+async fn setup_app_with_body_limit(
+    cors_allowed_origins: Vec<String>,
+    trusted_proxies: Vec<IpNet>,
+    max_connections: u32,
+    max_body_bytes: usize,
+) -> Router {
     let database_url = format!(
         "sqlite://{}?mode=rwc",
         std::env::temp_dir()
@@ -87,7 +102,7 @@ async fn setup_app_with_config(
         },
         middleware: MiddlewareConfig {
             request_timeout_secs: 10,
-            max_body_bytes: 2 * 1024 * 1024,
+            max_body_bytes,
             max_concurrency: 256,
             backpressure_queue: 256,
             rate_limit_requests: 1000,
@@ -351,6 +366,33 @@ async fn echo_creates_example() {
     assert_eq!(body["data"]["note"], "Start with logging and JWT");
     assert_eq!(body["data"]["source"], "example-service");
     assert!(!body["data"]["id"].as_str().unwrap_or("").is_empty());
+}
+
+#[tokio::test]
+async fn echo_obeys_configured_body_limit() {
+    let app = setup_app_with_body_limit(Vec::new(), Vec::new(), 2, 4 * 1024 * 1024).await;
+    let accepted = json!({"title": "large", "note": "x".repeat(3 * 1024 * 1024)});
+    let (status, _) = send(app.clone(), post_json("/api/v1/examples/echo", accepted)).await;
+    assert_eq!(status, StatusCode::OK);
+    let oversized = json!({"title": "large", "note": "x".repeat(4 * 1024 * 1024)}).to_string();
+    for declared in [true, false] {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/examples/echo")
+            .header(header::CONTENT_TYPE, "application/json");
+        if declared {
+            request = request.header(header::CONTENT_LENGTH, oversized.len());
+        }
+        let response = send_response(
+            app.clone(),
+            request.body(Body::from(oversized.clone())).unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(response.headers().contains_key("x-request-id"));
+        assert!(response.headers().contains_key("x-content-type-options"));
+        assert_eq!(read_json(response).await["code"], 413);
+    }
 }
 
 #[tokio::test]
@@ -796,9 +838,7 @@ async fn stale_version_returns_conflict() {
     })
     .await
     .expect("连接测试数据库");
-    run_migrations(&database, &database_url)
-        .await
-        .expect("执行迁移与播种");
+    run_migrations(&database).await.expect("执行迁移与播种");
 
     let snapshot = repository
         .find_account(&database, "acc_alice")
