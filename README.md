@@ -42,14 +42,14 @@ clone 下来即可跑通。
 ## 已经内置的能力
 
 - **洋葱架构骨架**：四层加装配层，参考实现可直接照抄扩展
-- **统一响应结构**：`{code, message, data?, timestamp}`，见 [统一响应结构](docs/RESPONSE.md)
+- **统一响应结构**：`{code, message, data?, timestamp}`，序列化失败返回安全 500，见 [统一响应结构](docs/RESPONSE.md)
 - **HTTP 生产保护栈**：请求 ID / 安全响应头 / CORS 白名单 / 背压 / 限流 / 含排队超时 / Body 限制 / 压缩 / panic 隔离，
   参数集中在 `.env`，见 [中间件栈与配置](docs/MIDDLEWARE.md)
-- **客户端保护**：按可信来源 IP 独立限并发、限请求量，显式可信代理与有界客户端注册表；共享出口共用额度
+- **客户端保护**：按可信来源 IP 独立限并发、限请求量，跨域保护错误遵循白名单；共享出口共用额度
 - **事务示例**：一次转账完整演示「启动事务 → 读写数据 → 提交 / 回滚」，见 [事务示例](docs/TRANSACTION.md)
 - **JWT 鉴权**：调试登录与当前用户解析，OpenAPI 文档与 Swagger UI 由 `docs` feature 提供（默认关闭，release 也可显式启用）
 - **低噪声排障**：每请求一条访问或慢请求诊断，包含可信 IP、请求 ID、路由模板、排队与数据库阶段耗时，
-  不记录 query/令牌/请求体；滚动文件日志 + 分批落盘 + 启动配置快照，见 [日志](docs/LOGGING.md)
+  不记录 query/令牌/请求体；文件日志分批落盘，磁盘故障时缓冲有界并向标准错误告警，部分写入后只重试剩余字节，见 [日志](docs/LOGGING.md)
 - **SeaORM**：连接池、连通性检查、幂等建表与种子数据、仓储适配器
 - **克隆即可运行**：数据库文件不入库，首次启动自动完成建表与播种
 
@@ -86,12 +86,13 @@ Copy-Item .env-example .env
 DATABASE_URL=sqlite://scaffold.db?mode=rwc
 ```
 
-因此可以在不额外安装 MySQL/PostgreSQL 的前提下直接启动。**当前只支持 SQLite**：迁移文件与
+因此可以在不额外安装 MySQL/PostgreSQL 的前提下直接启动，也可使用 `sqlite::memory:` 内存库。**当前只支持 SQLite**：迁移文件与
 补列/建索引逻辑都是 SQLite 语法（`pragma_table_info`），`DATABASE_URL` 填非 `sqlite://` 的连接串
 会在启动时被直接拒绝，而不是运行到一半才失败。数据库文件（`scaffold.db`）被 `.gitignore`
 排除，不入库；首次启动或首次跑测试时自动完成初始化：建表 → 补列建索引 → 播种演示账户
 （`acc_alice`、`acc_bob`，各 100000 分），初始化幂等，重复启动不会重复建表或重复播种。
 需要恢复到干净演示状态时，直接删除 `scaffold.db` 再启动即可。
+内存库要求共享缓存，且不会因连接池空闲或最大连接寿命而主动回收连接；所有连接关闭后数据仍会消失。
 
 ### 2. 启动服务
 
@@ -125,7 +126,7 @@ cargo run
 - `POST /api/v1/auth/dev-login`（仅调试构建）
 - `GET /api/v1/auth/me`
 - `POST /api/v1/examples/echo`
-- `GET /api/v1/examples`
+- `GET /api/v1/examples`：先按关键词过滤，再按 `page` / `size` 分页，超出末页返回空列表
 - `GET /api/v1/examples/{id}`
 - `POST /api/v1/transactions/dev-transfer`（仅调试构建）
 - `GET /api/v1/transactions`

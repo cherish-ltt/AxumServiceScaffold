@@ -266,6 +266,7 @@ msrv = "1.99.0"
   也不得当作业务任务队列使用。
 - 容量参数只允许定义在 `MiddlewareConfig`（`src/infrastructure/config.rs`）并从 `.env` 读取；
   中间件代码中不得出现字面量。新增参数必须同步 `.env`、`.env-example`、`tests/config_tests.rs`。
+- Axum 提取器的 Body 限制必须与全局 `RequestBodyLimitLayer` 使用同一配置值。
 - 代码兜底默认值必须与 `.env-example` 保持一致（当前：并发 256、背压队列 256、限流 32768 req/s、
   超时 10s、Body 2 MiB、周期 1s）；修改任一侧都必须同步另一侧与 `docs/MIDDLEWARE.md` 的「中间件配置」表格。
 - 客户端识别失败的状态码固定为 400 / 500，**不使用 403**（输入错误 vs 入口装配错误）；其余保护
@@ -275,9 +276,10 @@ msrv = "1.99.0"
   的响应格式保持一致；不要在中间件里手写 JSON。
 - 并发限制与限速是两个维度：并发限制约束在途请求数，限速约束单位时间请求数；
   两者均为**进程级**实现，多实例部署需在网关或共享存储层补齐分布式限流。
-- **CORS 也必须在栈里**：`CorsLayer` 由 `middleware/stack.rs` 的 `cors_layer(config)` 装配
-  （栈的最内层），来源白名单读 `MIDDLEWARE_CORS_ALLOWED_ORIGINS`；禁止在 `create_app`
+- **CORS 也必须在栈里**：`CorsLayer` 由 `middleware/stack.rs` 的 `cors_layer(config)` 装配，
+  内层处理预检，外层响应处理覆盖保护层拒绝；来源白名单读 `MIDDLEWARE_CORS_ALLOWED_ORIGINS`；禁止在 `create_app`
   或 controller 里直接挂 `CorsLayer::permissive()`，默认必须是不发任何 CORS 头。
+- OPTIONS 预检须经过客户端和全局保护；跨域响应暴露 `Retry-After` 和 `x-request-id`。
 - 调整执行顺序、新增或移除中间件时，必须同步更新 `docs/MIDDLEWARE.md` 的「中间件栈」章节与
   `docs/CHANGELOG.md`，并在 `tests/middleware_tests.rs` 补对应断言（至少覆盖超时、Body 超限、
   背压 503、限流 429、`request_id` 关联）。
@@ -299,7 +301,9 @@ msrv = "1.99.0"
   落盘一次，降低高频场景下逐条写文件的 CPU 开销；控制台层保持实时输出，不得加入缓冲。
 - 每条日志必须先格式化为完整一行再写入缓冲（`LineFormat` 包一层 `FormatEvent`），
   保证「条数」计数与日志行一一对应，禁止直接计数 fmt 层的分段写入。
-- 进程退出时必须停止定时刷盘线程并落盘剩余缓冲（`BatchGuard::drop`），不得丢日志。
+- 进程退出时必须停止定时刷盘线程并尝试落盘剩余缓冲（`BatchGuard::drop`）；磁盘故障时不能保证不丢日志。
+- 文件缓冲最多 2 MiB，空间不足时丢弃新事件并计数；写入失败、丢弃和恢复通过标准错误报告，不能递归写入文件日志。
+- 部分写入失败后只能重试尚未写入的字节；回归测试须用真实文件验证故障恢复后的内容及顺序。
 - 批量参数属于日志配置（`LoggingConfig`），走 `.env`；新增/调整时必须同步 `.env`、
   `.env-example`、`tests/config_tests.rs`（默认值、覆盖项、0 值校验）、`tests/config_template_tests.rs`
   （`config.rs` 读取的变量与模板一致）、`docs/LOGGING.md` 的
@@ -366,6 +370,9 @@ msrv = "1.99.0"
 ### 10.12 监听地址
 
 - `SERVER_HOST` 接受 IPv4 或 IPv6 字面量（兼容带方括号的 IPv6），配置加载时验证，不解析域名或接受额外端口。
+### 10.12 示例列表分页
+
+- 示例列表先按关键词过滤，再按已校验的 `page` / `size` 分页，越界页返回空列表。
 
 ### 10.1 测试组织与覆盖率
 
@@ -397,6 +404,7 @@ msrv = "1.99.0"
 - `code` 由 HTTP 状态码派生，唯一真值是 `ApiResponse` 内部私有的 `status: StatusCode`；禁止引入能独立设置 `code` 的构造入口。
 - 需要非 200 语义时使用 `ApiResponse::with_status(StatusCode, message, data)`，不要新增绕过状态码的构造器。
 - controller 直接返回 `ApiResponse<T>`（已实现 `IntoResponse`），不要再手动包裹 `Json`。
+- 响应序列化失败时返回统一的安全 500 JSON，错误详情仅写入服务端日志。
 - `204 No Content` 等不带响应体的状态码不属于 `ApiResponse` 职责，由 handler 直接返回 `StatusCode`。
 - `domain` 层不引入 `http::StatusCode`，错误状态码仍以 `AppError::http_code() -> u16` 表达，在外层 `src/error.rs` 才映射为 `StatusCode`。
 - 修改响应结构时必须同步更新 `docs/RESPONSE.md` 的「统一响应结构」章节与 `docs/CHANGELOG.md`。
@@ -421,6 +429,7 @@ msrv = "1.99.0"
 - **当前只支持 SQLite**：迁移文件与 `schema.rs` 的补列/索引逻辑都是 SQLite 语法
   （`pragma_table_info`）。`DATABASE_URL` 必须在 `AppConfig::from_env` 阶段校验为 `sqlite:` 开头，
   非法 scheme 拒绝启动；要换 MySQL/PostgreSQL 必须同时把迁移与补列逻辑重写成后端无关的写法。
+- SQLx 迁移必须复用应用的 SQLite 连接池；内存库必须使用共享缓存并关闭连接池空闲及生命周期回收，避免库被回收或多个连接访问不同库。
 - 每个事务用例至少覆盖「提交成功」与「中途失败回滚后数据无残留」两类测试，回滚测试需断言失败前状态未被改变。
 - 唯一约束冲突属于客户端可控冲突，在 `From<DbErr>` 中统一映射为 `AppError::Conflict`（409），
   响应文案用稳定描述（如 `resource already exists`），**不得**把数据库原始 detail（含表名、列名）

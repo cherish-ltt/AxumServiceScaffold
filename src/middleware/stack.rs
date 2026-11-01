@@ -1,14 +1,17 @@
-use std::time::Duration;
+use std::{convert::Infallible, time::Duration};
 
 use axum::{
     Router,
     body::Body,
     error_handling::HandleErrorLayer,
+    extract::DefaultBodyLimit,
+    extract::{Request, State},
     http::{HeaderName, HeaderValue, header},
+    middleware::Next,
     response::Response,
 };
 use tower::{
-    ServiceBuilder,
+    Layer, ServiceBuilder, ServiceExt,
     buffer::BufferLayer,
     limit::{ConcurrencyLimitLayer, RateLimitLayer},
     load_shed::LoadShedLayer,
@@ -38,11 +41,17 @@ const REQUEST_ID_HEADER: &str = "x-request-id";
 /// 必须包住整个 Router，不能用 `Router::layer`：后者会把有状态中间件逐路由复制一份，
 /// 全局并发上限与全局限流会因此失效。
 pub fn apply(app: Router, config: &MiddlewareConfig) -> Router {
-    let app = app.route_layer(axum::middleware::from_fn(diagnostics::route));
+    let app = app
+        .route_layer(axum::middleware::from_fn(diagnostics::route))
+        .layer(DefaultBodyLimit::max(config.max_body_bytes));
     let stack = ServiceBuilder::new()
         .layer(axum::middleware::from_fn(client_ip::sanitize_request_id))
         .layer(SetRequestIdLayer::new(request_id_header(), MakeRequestUuid))
         .layer(PropagateRequestIdLayer::new(request_id_header()))
+        .layer(axum::middleware::from_fn_with_state(
+            cors_layer(config),
+            cors_response,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             config.clone(),
             client_ip::identify,
@@ -92,7 +101,8 @@ fn cors_layer(config: &MiddlewareConfig) -> CorsLayer {
         return CorsLayer::new()
             .allow_origin(Any)
             .allow_methods(Any)
-            .allow_headers(Any);
+            .allow_headers(Any)
+            .expose_headers([header::RETRY_AFTER, request_id_header()]);
     }
 
     let allowed: Vec<HeaderValue> = config
@@ -109,6 +119,35 @@ fn cors_layer(config: &MiddlewareConfig) -> CorsLayer {
         .allow_origin(AllowOrigin::list(allowed))
         .allow_methods(Any)
         .allow_headers(Any)
+        .expose_headers([header::RETRY_AFTER, request_id_header()])
+}
+
+async fn cors_response(State(cors): State<CorsLayer>, request: Request, next: Next) -> Response {
+    let origin = request.headers().get(header::ORIGIN).cloned();
+    let mut response = next.run(request).await;
+    if let Some(origin) = origin {
+        let mut probe = Request::new(Body::empty());
+        probe.headers_mut().insert(header::ORIGIN, origin);
+        let service = cors.layer(tower::service_fn(|_: Request| async {
+            Ok::<_, Infallible>(Response::new(Body::empty()))
+        }));
+        let headers = match service.oneshot(probe).await {
+            Ok(result) => result,
+            Err(never) => match never {},
+        };
+        for name in [
+            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+            header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        ] {
+            if let Some(value) = headers.headers().get(&name) {
+                response.headers_mut().insert(name, value.clone());
+            }
+        }
+    }
+    response
+        .headers_mut()
+        .append(header::VARY, HeaderValue::from_static("origin"));
+    response
 }
 
 fn request_id_header() -> HeaderName {

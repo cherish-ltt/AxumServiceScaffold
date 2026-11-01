@@ -93,6 +93,21 @@ async fn setup_app_with_config(
     trusted_proxies: Vec<IpNet>,
     max_connections: u32,
 ) -> Router {
+    setup_app_with_body_limit(
+        cors_allowed_origins,
+        trusted_proxies,
+        max_connections,
+        2 * 1024 * 1024,
+    )
+    .await
+}
+
+async fn setup_app_with_body_limit(
+    cors_allowed_origins: Vec<String>,
+    trusted_proxies: Vec<IpNet>,
+    max_connections: u32,
+    max_body_bytes: usize,
+) -> Router {
     let database_url = format!(
         "sqlite://{}?mode=rwc",
         std::env::temp_dir()
@@ -136,7 +151,7 @@ async fn setup_app_with_config(
         },
         middleware: MiddlewareConfig {
             request_timeout_secs: 10,
-            max_body_bytes: 2 * 1024 * 1024,
+            max_body_bytes,
             max_concurrency: 256,
             backpressure_queue: 256,
             rate_limit_requests: 1000,
@@ -403,6 +418,33 @@ async fn echo_creates_example() {
 }
 
 #[tokio::test]
+async fn echo_obeys_configured_body_limit() {
+    let app = setup_app_with_body_limit(Vec::new(), Vec::new(), 2, 4 * 1024 * 1024).await;
+    let accepted = json!({"title": "large", "note": "x".repeat(3 * 1024 * 1024)});
+    let (status, _) = send(app.clone(), post_json("/api/v1/examples/echo", accepted)).await;
+    assert_eq!(status, StatusCode::OK);
+    let oversized = json!({"title": "large", "note": "x".repeat(4 * 1024 * 1024)}).to_string();
+    for declared in [true, false] {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/examples/echo")
+            .header(header::CONTENT_TYPE, "application/json");
+        if declared {
+            request = request.header(header::CONTENT_LENGTH, oversized.len());
+        }
+        let response = send_response(
+            app.clone(),
+            request.body(Body::from(oversized.clone())).unwrap(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(response.headers().contains_key("x-request-id"));
+        assert!(response.headers().contains_key("x-content-type-options"));
+        assert_eq!(read_json(response).await["code"], 413);
+    }
+}
+
+#[tokio::test]
 async fn echo_accepts_missing_note() {
     let app = setup_app().await;
     let (status, body) = send(
@@ -431,14 +473,48 @@ async fn echo_rejects_blank_title() {
 #[tokio::test]
 async fn list_examples_applies_filters() {
     let app = setup_app().await;
-    let (status, body) = send(app, get("/api/v1/examples?page=2&size=3&keyword=Swagger")).await;
+    let (status, body) = send(app, get("/api/v1/examples?page=1&size=3&keyword=Swagger")).await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["data"]["page"], 2);
+    assert_eq!(body["data"]["page"], 1);
     assert_eq!(body["data"]["size"], 3);
     assert_eq!(body["data"]["keyword"], "Swagger");
     assert_eq!(body["data"]["items"].as_array().map(Vec::len), Some(1));
     assert_eq!(body["data"]["items"][0]["id"], "example_003");
+}
+
+#[tokio::test]
+async fn list_examples_pages_after_filtering() {
+    let app = setup_app().await;
+    for (page, expected) in [
+        (1, Some("example_001")),
+        (2, Some("example_002")),
+        (3, Some("example_003")),
+        (4, None),
+    ] {
+        let (status, body) = send(
+            app.clone(),
+            get(&format!("/api/v1/examples?page={page}&size=1")),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["page"], page);
+        assert_eq!(body["data"]["size"], 1);
+        let items = body["data"]["items"].as_array().unwrap();
+        assert_eq!(items.first().and_then(|item| item["id"].as_str()), expected);
+        assert_eq!(items.len(), usize::from(expected.is_some()));
+    }
+    for (query, expected) in [
+        ("page=1&size=1&keyword=sample", Some("example_002")),
+        ("page=2&size=1&keyword=sample", Some("example_003")),
+        ("page=1&size=1&keyword=missing", None),
+    ] {
+        let (status, body) = send(app.clone(), get(&format!("/api/v1/examples?{query}"))).await;
+        assert_eq!(status, StatusCode::OK);
+        let items = body["data"]["items"].as_array().unwrap();
+        assert_eq!(items.first().and_then(|item| item["id"].as_str()), expected);
+        assert_eq!(items.len(), usize::from(expected.is_some()));
+    }
 }
 
 #[tokio::test]
@@ -811,9 +887,7 @@ async fn stale_version_returns_conflict() {
     })
     .await
     .expect("连接测试数据库");
-    run_migrations(&database, &database_url)
-        .await
-        .expect("执行迁移与播种");
+    run_migrations(&database).await.expect("执行迁移与播种");
 
     let snapshot = repository
         .find_account(&database, "acc_alice")
