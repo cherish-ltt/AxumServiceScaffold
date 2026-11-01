@@ -266,6 +266,7 @@ msrv = "1.99.0"
   也不得当作业务任务队列使用。
 - 容量参数只允许定义在 `MiddlewareConfig`（`src/infrastructure/config.rs`）并从 `.env` 读取；
   中间件代码中不得出现字面量。新增参数必须同步 `.env`、`.env-example`、`tests/config_tests.rs`。
+- Axum 提取器的 Body 限制必须与全局 `RequestBodyLimitLayer` 使用同一配置值。
 - 代码兜底默认值必须与 `.env-example` 保持一致（当前：并发 256、背压队列 256、限流 32768 req/s、
   超时 10s、Body 2 MiB、周期 1s）；修改任一侧都必须同步另一侧与 `docs/MIDDLEWARE.md` 的「中间件配置」表格。
 - 客户端识别失败的状态码固定为 400 / 500，**不使用 403**（输入错误 vs 入口装配错误）；其余保护
