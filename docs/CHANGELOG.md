@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+无
+
+## 0.9.0 - 2026-11-01
+
+ 本版重点：修复 issue#4，5，6，7，8，9，10，11 提到的相关问题。
+
 ### 修复
 
 - 支持以原始 IPv6 字面量配置 `SERVER_HOST`，并在加载配置时拒绝非法监听地址。
@@ -295,7 +301,7 @@
     `unsupported_method_returns_405_with_allow_header`（405 且 `allow: GET,HEAD`）、
     `cors_preflight_is_allowed_for_every_origin`（预检 200 且放开来源与方法）。
   - 鉴权：`transaction_endpoints_require_bearer_token`、
-    `malformed_authorization_header_is_rejected_with_401`（`Bearer` / `Bearer   ` 两种缺 token 写法）、
+    `malformed_authorization_header_is_rejected_with_401`（`Bearer` / `Bearer` 两种缺 token 写法）、
     `expired_token_is_rejected_with_401`（同密钥签发、已过期 5 分钟）、
     `dev_login_with_empty_roles_falls_back_to_default_role`（空 `roles` 回退为 `developer`）。
   - 辅助：新增 `send_response`（取原始 `Response` 以断言响应头）、`read_json`、
