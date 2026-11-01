@@ -78,6 +78,11 @@ impl ExampleUseCase for ExampleService {
         if let Some(keyword) = &keyword {
             items.retain(|item| item.title.contains(keyword) || item.summary.contains(keyword));
         }
+        let items = items
+            .into_iter()
+            .skip(((page - 1) * size) as usize)
+            .take(size as usize)
+            .collect();
 
         Ok(ExampleList {
             page,

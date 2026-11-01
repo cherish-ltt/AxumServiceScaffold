@@ -123,7 +123,7 @@ cargo run
 - `POST /api/v1/auth/dev-login`（仅调试构建）
 - `GET /api/v1/auth/me`
 - `POST /api/v1/examples/echo`
-- `GET /api/v1/examples`
+- `GET /api/v1/examples`：先按关键词过滤，再按 `page` / `size` 分页，超出末页返回空列表
 - `GET /api/v1/examples/{id}`
 - `POST /api/v1/transactions/dev-transfer`（仅调试构建）
 - `GET /api/v1/transactions`
