@@ -1,6 +1,5 @@
 use std::{
     io::{self, Write},
-    mem,
     sync::{Arc, Mutex, mpsc},
     thread::{self, JoinHandle},
     time::Duration,
@@ -276,7 +275,11 @@ pub struct BatchFileWriter {
 struct BatchState {
     buf: Vec<u8>,
     events: usize,
+    dropped: u64,
+    failing: bool,
 }
+
+const MAX_BUFFER_BYTES: usize = 2 * 1024 * 1024;
 
 impl BatchFileWriter {
     fn new(inner: RollingFileAppender, batch_max_events: usize, flush_interval: Duration) -> Self {
@@ -288,37 +291,43 @@ impl BatchFileWriter {
         }
     }
 
-    /// 把缓冲内容一次性写入文件并清空。
-    ///
-    /// 磁盘 IO 在锁外进行：先在锁内取走缓冲并重置计数，再释放锁写文件。
-    /// 否则定时刷盘或满批落盘时，所有写日志的线程会被写盘时间串行阻塞。
+    /// 把缓冲内容写入文件，保留尚未写入的字节。
     fn flush(&self) -> io::Result<()> {
-        let (mut pending, pending_events) = {
-            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            if state.buf.is_empty() {
-                return Ok(());
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut written = 0;
+        let result = (|| {
+            while written < state.buf.len() {
+                match inner.write(&state.buf[written..]) {
+                    Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                    Ok(n) => written += n,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(e),
+                }
             }
-            (
-                mem::take(&mut state.buf),
-                mem::replace(&mut state.events, 0),
-            )
-        };
-
-        let write_result = {
-            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-            inner.write_all(&pending).and_then(|()| inner.flush())
-        };
-
-        if let Err(error) = write_result {
-            // 写盘失败时把内容放回缓冲队首，避免丢日志。
-            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            pending.extend_from_slice(&state.buf);
-            state.buf = pending;
-            state.events += pending_events;
-            return Err(error);
+            if written > 0 || state.failing {
+                inner.flush()?;
+            }
+            Ok(())
+        })();
+        state.buf.drain(..written);
+        if state.buf.is_empty() {
+            state.events = 0;
         }
-
-        Ok(())
+        if let Err(ref error) = result {
+            if !state.failing {
+                let _ = writeln!(io::stderr(), "file log write failed: {error}");
+            }
+            state.failing = true;
+        } else if state.failing {
+            let _ = writeln!(
+                io::stderr(),
+                "file log writes recovered; dropped events: {}",
+                state.dropped
+            );
+            state.failing = false;
+        }
+        result
     }
 
     /// 启动后台定时刷盘线程，返回持有停止信号与线程句柄的 guard。
@@ -327,8 +336,19 @@ impl BatchFileWriter {
         let flusher = self.clone();
         let interval = flusher.flush_interval;
         let thread = thread::spawn(move || {
+            let mut reported_dropped = 0;
             while rx.recv_timeout(interval).is_err() {
                 let _ = flusher.flush();
+                let state = flusher.state.lock().unwrap_or_else(|e| e.into_inner());
+                if state.failing || state.dropped != reported_dropped {
+                    let _ = writeln!(
+                        io::stderr(),
+                        "file log status: failing={}, dropped events={}",
+                        state.failing,
+                        state.dropped
+                    );
+                    reported_dropped = state.dropped;
+                }
             }
         });
         BatchGuard {
@@ -353,11 +373,18 @@ pub struct BatchWriter(BatchFileWriter);
 impl Write for BatchWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
+        if buf.len() > MAX_BUFFER_BYTES - state.buf.len() {
+            state.dropped = state.dropped.saturating_add(1);
+            if state.dropped == 1 {
+                let _ = writeln!(io::stderr(), "file log buffer full; dropped events: 1");
+            }
+            return Ok(buf.len());
+        }
         state.buf.extend_from_slice(buf);
         state.events += 1;
         if state.events >= self.0.batch_max_events {
             drop(state);
-            self.0.flush()?;
+            let _ = self.0.flush();
         }
         Ok(buf.len())
     }
@@ -382,8 +409,14 @@ impl Drop for BatchGuard {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
-        if let Err(e) = self.writer.flush() {
-            tracing::error!("failed to flush logs on guard drop: {e}");
+        let _ = self.writer.flush();
+        let state = self.writer.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.dropped > 0 {
+            let _ = writeln!(
+                io::stderr(),
+                "file log total dropped events: {}",
+                state.dropped
+            );
         }
     }
 }
@@ -443,6 +476,90 @@ fn mask_secret(secret: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_logs_are_written_after_recovery() {
+        let dir = std::env::temp_dir().join(format!("log-recovery-{}", uuid::Uuid::now_v7()));
+        let appender = RollingFileAppender::builder()
+            .rotation(tracing_appender::rolling::Rotation::NEVER)
+            .filename_prefix("test")
+            .build(&dir)
+            .unwrap();
+        let writer = BatchFileWriter::new(appender, 10, Duration::from_secs(1));
+        writer.make_writer().write_all(b"retained\n").unwrap();
+        writer.state.lock().unwrap().failing = true;
+        writer.flush().unwrap();
+        let state = writer.state.lock().unwrap();
+        assert!(!state.failing);
+        assert!(state.buf.is_empty());
+        drop(state);
+        drop(writer);
+        let path = std::fs::read_dir(&dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert_eq!(std::fs::read(path).unwrap(), b"retained\n");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn disk_failure_is_bounded_and_reported() {
+        const CHILD: &str = "SCAFFOLD_LOG_FAILURE_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new("sh")
+                .arg("-c")
+                .arg("ulimit -f 0; trap '' XFSZ; exec \"$1\" --exact logging::tests::disk_failure_is_bounded_and_reported --nocapture")
+                .arg("sh")
+                .arg(std::env::current_exe().unwrap())
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(stderr.contains("file log write failed"), "{stderr}");
+            assert!(stderr.contains("dropped events"), "{stderr}");
+            return;
+        }
+
+        let dir = std::env::temp_dir().join(format!("log-failure-{}", uuid::Uuid::now_v7()));
+        let appender = RollingFileAppender::builder()
+            .rotation(tracing_appender::rolling::Rotation::NEVER)
+            .filename_prefix("test")
+            .build(&dir)
+            .unwrap();
+        let writer = BatchFileWriter::new(appender, 10000, Duration::from_millis(20));
+        let guard = writer.start_flusher();
+        writer.make_writer().write_all(b"first event\n").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !writer.state.lock().unwrap().failing && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(writer.state.lock().unwrap().failing);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                let writer = writer.clone();
+                scope.spawn(move || {
+                    for _ in 0..800 {
+                        writer.make_writer().write_all(&[b'x'; 1024]).unwrap();
+                    }
+                });
+            }
+        });
+        let state = writer.state.lock().unwrap();
+        assert!(state.buf.len() <= MAX_BUFFER_BYTES);
+        assert!(state.dropped > 0);
+        assert!(state.buf.starts_with(b"first event\n"));
+        drop(state);
+        drop(guard);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn url_password_is_masked() {
