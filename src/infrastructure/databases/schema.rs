@@ -100,7 +100,7 @@ mod tests {
     use super::super::run_migrations;
     use crate::entities::{transfer_account, transfer_audit, transfer_record};
 
-    async fn setup_database() -> (DatabaseConnection, String) {
+    async fn setup_database() -> DatabaseConnection {
         let url = format!(
             "sqlite://{}?mode=rwc",
             std::env::temp_dir()
@@ -108,24 +108,21 @@ mod tests {
                 .display()
         );
 
-        let database = Database::connect(url.clone())
-            .await
-            .expect("连接临时数据库");
-        (database, url)
+        Database::connect(url).await.expect("连接临时数据库")
     }
 
     /// 执行 sqlx 迁移 + 索引 + 播种，可重复执行。
-    async fn bootstrap(database: &DatabaseConnection, url: &str) {
-        run_migrations(database, url).await.expect("执行迁移成功");
+    async fn bootstrap(database: &DatabaseConnection) {
+        run_migrations(database).await.expect("执行迁移成功");
     }
 
     #[tokio::test]
     async fn tables_and_seed_are_created_once() {
-        let (database, url) = setup_database().await;
+        let database = setup_database().await;
 
-        bootstrap(&database, &url).await;
+        bootstrap(&database).await;
         // 重复执行验证幂等性：再次启动服务不应产生重复账户或建表错误。
-        bootstrap(&database, &url).await;
+        bootstrap(&database).await;
 
         let accounts = transfer_account::Entity::find()
             .all(&database)
@@ -158,10 +155,58 @@ mod tests {
         assert!(audits.is_empty());
     }
 
+    #[tokio::test]
+    async fn memory_database_uses_application_pool_for_migrations() {
+        use crate::infrastructure::{config::DatabaseConfig, databases::connect_database};
+        let config = DatabaseConfig {
+            url: "sqlite::memory:".to_string(),
+            min_connections: 1,
+            max_connections: 2,
+            connect_timeout_secs: 5,
+            idle_secs: 1,
+            sqlx_logging: false,
+        };
+        let database = connect_database(&config).await.unwrap();
+        run_migrations(&database).await.unwrap();
+        run_migrations(&database).await.unwrap();
+        let pool = database.get_sqlite_connection_pool();
+        assert_eq!(pool.options().get_idle_timeout(), None);
+        assert_eq!(pool.options().get_max_lifetime(), None);
+        let held = pool.acquire().await.unwrap();
+        let accounts: i64 = sqlx::query_scalar("SELECT count(*) FROM transfer_accounts")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        let tables: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name IN ('transfer_accounts', 'transfer_records', 'transfer_audits', '_sqlx_migrations')").fetch_one(pool).await.unwrap();
+        let indexes: i64 = sqlx::query_scalar("SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name IN ('idx_transfer_records_created_at', 'idx_transfer_records_request_id', 'idx_transfer_audits_record_id')").fetch_one(pool).await.unwrap();
+        assert_eq!((accounts, tables, indexes), (2, 4, 3));
+        drop(held);
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert_eq!(
+            transfer_account::Entity::find()
+                .all(&database)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        let private = DatabaseConfig {
+            url: "sqlite::memory:?cache=private".to_string(),
+            ..config
+        };
+        assert!(
+            connect_database(&private)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("shared cache")
+        );
+    }
+
     /// 老库（无 request_id 列）启动后应自动补列并建好唯一索引。
     #[tokio::test]
     async fn legacy_database_gets_request_id_column_and_unique_index() {
-        let (database, url) = setup_database().await;
+        let database = setup_database().await;
 
         database
             .execute_unprepared(
@@ -187,10 +232,8 @@ mod tests {
             .expect("写入历史流水");
 
         // 真实启动流程：sqlx 迁移建表（老库同名表自动跳过）→ 补列建索引 → 播种；重复执行应幂等。
-        run_migrations(&database, &url).await.expect("执行迁移成功");
-        run_migrations(&database, &url)
-            .await
-            .expect("重复执行迁移成功");
+        run_migrations(&database).await.expect("执行迁移成功");
+        run_migrations(&database).await.expect("重复执行迁移成功");
 
         let legacy = transfer_record::Entity::find_by_id("legacy".to_string())
             .one(&database)
