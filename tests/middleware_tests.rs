@@ -298,6 +298,109 @@ async fn cors_layer_follows_allowed_origins_config() {
     );
 }
 
+#[tokio::test]
+async fn cors_covers_rejections_without_bypassing_preflight_limits() {
+    let mut config = base_config();
+    config.client_rate_limit_requests = 1;
+    config.client_rate_limit_period_secs = 60;
+    let app = ping_app(&config);
+    let preflight = send(app.clone(), cors_preflight("https://example.com")).await;
+    assert_eq!(preflight.status(), StatusCode::OK);
+    let mut request = get_request("/ping");
+    request
+        .headers_mut()
+        .insert(header::ORIGIN, "https://example.com".parse().unwrap());
+    let rejected = send(app, request).await;
+    assert_eq!(
+        rejected.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+        "https://example.com"
+    );
+    assert!(
+        rejected.headers()[header::ACCESS_CONTROL_EXPOSE_HEADERS]
+            .to_str()
+            .unwrap()
+            .contains("retry-after")
+    );
+    assert!(
+        rejected.headers()[header::ACCESS_CONTROL_EXPOSE_HEADERS]
+            .to_str()
+            .unwrap()
+            .contains("x-request-id")
+    );
+    assert!(rejected.headers().contains_key(header::RETRY_AFTER));
+    assert_error(rejected, StatusCode::TOO_MANY_REQUESTS).await;
+
+    for origins in [vec!["https://example.com".to_string()], Vec::new()] {
+        config.cors_allowed_origins = origins;
+        let app = ping_app(&config);
+        let mut first = get_request("/ping");
+        first
+            .headers_mut()
+            .insert(header::ORIGIN, "https://evil.example".parse().unwrap());
+        let _ = send(app.clone(), first).await;
+        let mut second = get_request("/ping");
+        second
+            .headers_mut()
+            .insert(header::ORIGIN, "https://evil.example".parse().unwrap());
+        let rejected = send(app, second).await;
+        assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(
+            !rejected
+                .headers()
+                .contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+        );
+    }
+}
+
+#[tokio::test]
+async fn cors_covers_timeout_body_limit_and_panic() {
+    let mut config = base_config();
+    config.request_timeout_secs = 1;
+    config.max_body_bytes = 16;
+    let app = middleware::apply(
+        Router::new()
+            .route("/slow", get(slow_handler))
+            .route("/upload", post(|_: axum::body::Bytes| async { "ok" }))
+            .route(
+                "/panic",
+                get(|| async {
+                    panic!("test panic");
+                    #[allow(unreachable_code)]
+                    "ok"
+                }),
+            ),
+        &config,
+    );
+    for (path, status) in [
+        ("/slow", StatusCode::REQUEST_TIMEOUT),
+        ("/panic", StatusCode::INTERNAL_SERVER_ERROR),
+    ] {
+        let mut request = get_request(path);
+        request
+            .headers_mut()
+            .insert(header::ORIGIN, "https://example.com".parse().unwrap());
+        let response = send(app.clone(), request).await;
+        assert_eq!(
+            response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+            "https://example.com"
+        );
+        assert_error(response, status).await;
+    }
+    let request = Request::builder()
+        .method("POST")
+        .uri("/upload")
+        .header(header::ORIGIN, "https://example.com")
+        .header(header::CONTENT_LENGTH, "32")
+        .body(Body::from(vec![0; 32]))
+        .unwrap();
+    let response = send(app, request).await;
+    assert_eq!(
+        response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN],
+        "https://example.com"
+    );
+    assert_error(response, StatusCode::PAYLOAD_TOO_LARGE).await;
+}
+
 async fn assert_error(response: axum::response::Response, status: StatusCode) {
     assert_eq!(response.status(), status);
     assert!(response.headers().contains_key("x-request-id"));
