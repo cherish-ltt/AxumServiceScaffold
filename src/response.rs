@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use chrono::Local;
@@ -72,7 +72,22 @@ impl<T: Serialize> Serialize for ApiResponse<T> {
 
 impl<T: Serialize> IntoResponse for ApiResponse<T> {
     fn into_response(self) -> Response {
-        (self.status, Json(self)).into_response()
+        match serde_json::to_vec(&self) {
+            Ok(body) => (
+                self.status,
+                [(header::CONTENT_TYPE, "application/json")],
+                body,
+            )
+                .into_response(),
+            Err(error) => {
+                tracing::error!(%error, "response serialization failed");
+                let response = ApiResponse::<()>::error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Internal server error",
+                );
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(response)).into_response()
+            },
+        }
     }
 }
 
@@ -143,5 +158,37 @@ mod tests {
             .to_str()
             .expect("content-type 可读");
         assert_eq!(content_type, "application/json");
+    }
+
+    #[tokio::test]
+    async fn serialization_errors_return_safe_json() {
+        let data = std::collections::BTreeMap::from([((1_u8, 2_u8), 3_u8)]);
+        let response = ApiResponse::ok(data).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.headers()[axum::http::header::CONTENT_TYPE],
+            "application/json"
+        );
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["code"], 500);
+        assert_eq!(body["message"], "Internal server error");
+        assert!(body.get("data").is_none());
+        assert!(!String::from_utf8_lossy(&bytes).contains("key must be a string"));
+
+        struct Failing;
+        impl serde::Serialize for Failing {
+            fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("private marker"))
+            }
+        }
+        let response = ApiResponse::ok(Failing).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("private marker"));
     }
 }

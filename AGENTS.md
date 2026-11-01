@@ -395,6 +395,7 @@ msrv = "1.99.0"
 - `code` 由 HTTP 状态码派生，唯一真值是 `ApiResponse` 内部私有的 `status: StatusCode`；禁止引入能独立设置 `code` 的构造入口。
 - 需要非 200 语义时使用 `ApiResponse::with_status(StatusCode, message, data)`，不要新增绕过状态码的构造器。
 - controller 直接返回 `ApiResponse<T>`（已实现 `IntoResponse`），不要再手动包裹 `Json`。
+- 响应序列化失败时返回统一的安全 500 JSON，错误详情仅写入服务端日志。
 - `204 No Content` 等不带响应体的状态码不属于 `ApiResponse` 职责，由 handler 直接返回 `StatusCode`。
 - `domain` 层不引入 `http::StatusCode`，错误状态码仍以 `AppError::http_code() -> u16` 表达，在外层 `src/error.rs` 才映射为 `StatusCode`。
 - 修改响应结构时必须同步更新 `docs/RESPONSE.md` 的「统一响应结构」章节与 `docs/CHANGELOG.md`。

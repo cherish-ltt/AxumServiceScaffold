@@ -68,6 +68,25 @@ async fn hold_handler() -> &'static str {
 }
 
 #[tokio::test]
+async fn serialization_failure_keeps_error_envelope_and_headers() {
+    let app = middleware::apply(
+        Router::new().route(
+            "/serialize",
+            get(|| async {
+                axum_service_scaffold::response::ApiResponse::ok(std::collections::BTreeMap::from(
+                    [((1_u8, 2_u8), 3_u8)],
+                ))
+            }),
+        ),
+        &base_config(),
+    );
+    let response = send(app, get_request("/serialize")).await;
+    assert!(response.headers().contains_key("x-request-id"));
+    assert!(response.headers().contains_key("x-content-type-options"));
+    assert_error(response, StatusCode::INTERNAL_SERVER_ERROR).await;
+}
+
+#[tokio::test]
 async fn request_over_timeout_is_rejected_with_408() {
     let mut config = base_config();
     config.request_timeout_secs = 1;
