@@ -1,4 +1,5 @@
 use std::env;
+use std::ffi::{OsStr, OsString};
 use std::net::IpAddr;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -14,7 +15,7 @@ fn env_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn set_var(key: &str, value: &str) {
+fn set_var(key: &str, value: impl AsRef<OsStr>) {
     unsafe { env::set_var(key, value) };
 }
 
@@ -24,7 +25,7 @@ fn remove_var(key: &str) {
 
 /// 断言结束（含 panic）时恢复环境变量的守卫：panic 展开也会执行 Drop。
 struct EnvRestore {
-    saved: Vec<(String, Option<String>)>,
+    saved: Vec<(String, Option<OsString>)>,
 }
 
 impl Drop for EnvRestore {
@@ -41,15 +42,19 @@ impl Drop for EnvRestore {
 /// 临时设置环境变量后执行断言，结束时（含断言 panic）恢复原始值。
 fn with_env<F: FnOnce()>(vars: &[(&str, Option<&str>)], assertion: F) {
     let _lock = env_lock();
-    let saved: Vec<(String, Option<String>)> = vars
+    let mut vars = vars.to_vec();
+    if !vars.iter().any(|(key, _)| *key == "JWT_KEY_SET") {
+        vars.push(("JWT_KEY_SET", None));
+    }
+    let saved: Vec<(String, Option<OsString>)> = vars
         .iter()
-        .map(|(key, _)| (key.to_string(), env::var(key).ok()))
+        .map(|(key, _)| (key.to_string(), env::var_os(key)))
         .collect();
 
     // 先挂上恢复守卫，再改环境变量：无论 assertion 是否 panic，都会恢复。
     let _restore = EnvRestore { saved };
 
-    for (key, value) in vars {
+    for (key, value) in &vars {
         match value {
             Some(value) => set_var(key, value),
             None => remove_var(key),
@@ -61,6 +66,252 @@ fn with_env<F: FnOnce()>(vars: &[(&str, Option<&str>)], assertion: F) {
 
 const EXAMPLE_SECRET: &str = "change-me-to-a-random-string-with-at-least-32-characters";
 const CUSTOM_SECRET: &str = "unit-test-secret-that-is-definitely-long-enough";
+
+#[test]
+fn jwt_key_set_example_survives_dotenv_parsing() {
+    let line = include_str!("../.env-example")
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("# JWT_KEY_SET="))
+        .expect("模板应提供轮换示例");
+    with_env(
+        &[
+            ("APP_ENV", Some("development")),
+            ("JWT_SECRET", None),
+            ("JWT_KEY_SET", None),
+        ],
+        || {
+            let path = env::temp_dir().join(format!("jwt-template-{}.env", uuid::Uuid::now_v7()));
+            std::fs::write(&path, format!("JWT_KEY_SET={line}\n")).unwrap();
+            let loaded = dotenv::from_path(&path);
+            std::fs::remove_file(&path).unwrap();
+            loaded.expect("示例应遵守 dotenv 语法");
+            let config = AppConfig::from_env().expect("dotenv 读取后仍须为有效轮换配置");
+            assert!(config.jwt.key_set.is_some());
+
+            set_var("APP_ENV", "production");
+            let error = AppConfig::from_env().expect_err("生产环境必须拒绝模板中的轮换示例密钥");
+            assert_eq!(
+                error.to_string(),
+                "example JWT_KEY_SET secret is not allowed in production environment"
+            );
+            assert!(!format!("{error:#?}").contains(EXAMPLE_SECRET));
+        },
+    );
+}
+
+#[test]
+fn jwt_key_set_replaces_the_single_secret() {
+    let keys = serde_json::json!({
+        "current_kid": "new",
+        "keys": [{"kid": "new", "secret": CUSTOM_SECRET}]
+    })
+    .to_string();
+    with_env(
+        &[("JWT_SECRET", None), ("JWT_KEY_SET", Some(&keys))],
+        || {
+            AppConfig::from_env().expect("密钥集合应能独立提供签发与验证配置");
+        },
+    );
+}
+
+#[test]
+fn jwt_key_set_conflicts_with_single_secret() {
+    let keys = serde_json::json!({
+        "current_kid": "new",
+        "keys": [{"kid": "new", "secret": CUSTOM_SECRET}]
+    })
+    .to_string();
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("JWT_KEY_SET", Some(&keys)),
+        ],
+        || {
+            let error = AppConfig::from_env().expect_err("禁止并存两个密钥真值来源");
+            assert!(error.to_string().contains("JWT_SECRET"));
+            assert!(!format!("{error:#}").contains(CUSTOM_SECRET));
+        },
+    );
+}
+
+#[test]
+fn jwt_rotation_rejects_invalid_configurations_without_disclosing_secrets() {
+    use serde_json::json;
+    let current = json!({"kid": "B", "secret": CUSTOM_SECRET});
+    let old = json!({"kid": "A", "secret": CUSTOM_SECRET, "accept_until": 1893456000});
+    let base = json!({"current_kid": "B", "keys": [current.clone(), old.clone()]});
+    let mut cases = vec![
+        ("empty set", json!({"current_kid": "B", "keys": []})),
+        (
+            "too many keys",
+            json!({"current_kid": "B", "keys": [current.clone(), old.clone(), old.clone(), old.clone(), old]}),
+        ),
+        (
+            "duplicate kid",
+            json!({"current_kid": "B", "keys": [current.clone(), current]}),
+        ),
+    ];
+    for (label, field, value) in [
+        ("missing current key", "current_kid", json!("missing")),
+        ("wrong current type", "current_kid", json!(12)),
+        ("missing legacy key", "legacy_kid", json!("missing")),
+        ("empty legacy key", "legacy_kid", json!("")),
+        ("legacy requires deadline", "legacy_kid", json!("B")),
+        ("unknown root field", CUSTOM_SECRET, json!(true)),
+    ] {
+        let mut value_config = base.clone();
+        value_config[field] = value;
+        cases.push((label, value_config));
+    }
+    for (label, field, value) in [
+        ("empty kid", "kid", json!("")),
+        ("long kid", "kid", json!("a".repeat(65))),
+        ("invalid kid", "kid", json!("../key")),
+        (
+            "short current secret",
+            "secret",
+            json!("short-current-secret"),
+        ),
+        ("zero cutoff", "accept_until", json!(0)),
+        ("negative cutoff", "accept_until", json!(-1)),
+        ("unrepresentable cutoff", "accept_until", json!(i64::MAX)),
+        ("fractional cutoff", "accept_until", json!(1.5)),
+        ("string cutoff", "accept_until", json!(CUSTOM_SECRET)),
+        ("unknown key field", CUSTOM_SECRET, json!(true)),
+    ] {
+        let mut value_config = base.clone();
+        value_config["keys"][0][field] = value;
+        cases.push((label, value_config));
+    }
+    let mut missing_current = base.clone();
+    missing_current
+        .as_object_mut()
+        .unwrap()
+        .remove("current_kid");
+    cases.push(("missing current field", missing_current));
+    let mut missing_cutoff = base.clone();
+    missing_cutoff["keys"][1]
+        .as_object_mut()
+        .unwrap()
+        .remove("accept_until");
+    cases.push(("missing extra key cutoff", missing_cutoff));
+    let mut short_extra = base;
+    short_extra["keys"][1]["secret"] = json!("short-extra-secret");
+    cases.push(("short extra secret", short_extra));
+
+    for (label, value) in cases {
+        let raw = value.to_string();
+        with_env(
+            &[
+                ("APP_ENV", Some("development")),
+                ("JWT_SECRET", None),
+                ("JWT_KEY_SET", Some(&raw)),
+            ],
+            || {
+                let error = AppConfig::from_env().expect_err(label);
+                let rendered = format!("{error:#?}");
+                assert!(rendered.contains("JWT_KEY_SET"), "{label}: {rendered}");
+                assert!(!rendered.contains(CUSTOM_SECRET), "{label}");
+                assert!(
+                    !rendered.contains("short-current-secret")
+                        && !rendered.contains("short-extra-secret"),
+                    "{label}"
+                );
+            },
+        );
+    }
+}
+
+#[test]
+fn jwt_rotation_parse_errors_hide_raw_json() {
+    for raw in [
+        CUSTOM_SECRET.to_string(),
+        format!(r#"{{"current_kid":"{CUSTOM_SECRET}","keys":{{}}}}"#),
+    ] {
+        with_env(&[("JWT_SECRET", None), ("JWT_KEY_SET", Some(&raw))], || {
+            let error = AppConfig::from_env().expect_err("非法 JSON 必须拒绝");
+            assert!(error.to_string().contains("JWT_KEY_SET"));
+            assert!(!format!("{error:#?}").contains(CUSTOM_SECRET));
+        });
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn jwt_rotation_rejects_non_unicode_config_without_disclosing_secrets() {
+    use std::os::unix::ffi::OsStringExt;
+
+    for key in ["JWT_KEY_SET", "JWT_SECRET"] {
+        with_env(
+            &[("JWT_SECRET", Some(CUSTOM_SECRET)), ("JWT_KEY_SET", None)],
+            || {
+                let mut raw = CUSTOM_SECRET.as_bytes().to_vec();
+                raw.push(0xff);
+                unsafe { env::set_var(key, OsString::from_vec(raw)) };
+                let error = AppConfig::from_env().expect_err("非法编码不能静默忽略");
+                assert!(error.to_string().contains(key));
+                assert!(error.to_string().contains("valid Unicode"));
+                assert!(!format!("{error:#?}").contains(CUSTOM_SECRET));
+            },
+        );
+    }
+}
+
+#[test]
+fn jwt_rotation_applies_production_secret_rules_to_every_key() {
+    for example_index in 0..2 {
+        let mut raw = serde_json::json!({"current_kid": "B", "keys": [
+            {"kid": "B", "secret": CUSTOM_SECRET},
+            {"kid": "A", "secret": CUSTOM_SECRET, "accept_until": 1}
+        ]});
+        raw["keys"][example_index]["secret"] = serde_json::json!(EXAMPLE_SECRET);
+        let raw = raw.to_string();
+        with_env(
+            &[
+                ("APP_ENV", Some("production")),
+                ("JWT_SECRET", None),
+                ("JWT_KEY_SET", Some(&raw)),
+            ],
+            || {
+                let error = AppConfig::from_env().expect_err("所有项均须遵守生产密钥约束");
+                assert!(error.to_string().contains("not allowed in production"));
+                assert!(!format!("{error:#?}").contains(EXAMPLE_SECRET));
+            },
+        );
+    }
+}
+
+#[test]
+fn jwt_rotation_accepts_four_keys_and_past_cutoffs() {
+    let keys: Vec<_> = ["A", "B", "C", "D"]
+        .into_iter()
+        .map(|kid| serde_json::json!({"kid": kid, "secret": CUSTOM_SECRET, "accept_until": 1}))
+        .collect();
+    let raw = serde_json::json!({"current_kid": "B", "legacy_kid": "A", "keys": keys}).to_string();
+    with_env(
+        &[
+            ("APP_ENV", Some("production")),
+            ("JWT_SECRET", Some("")),
+            ("JWT_KEY_SET", Some(&raw)),
+        ],
+        || {
+            AppConfig::from_env().expect("已截止配置可加载，但令牌使用时必须拒绝");
+        },
+    );
+}
+
+#[test]
+fn jwt_rotation_empty_value_keeps_single_secret_mode() {
+    with_env(
+        &[
+            ("JWT_SECRET", Some(CUSTOM_SECRET)),
+            ("JWT_KEY_SET", Some("")),
+        ],
+        || {
+            AppConfig::from_env().expect("空集合配置保持原单密钥模式");
+        },
+    );
+}
 
 /// Rotation 的 Debug 输出为 PascalCase（如 Daily），统一小写后比较。
 fn rotation_debug(rotation: &tracing_appender::rolling::Rotation) -> String {
@@ -196,7 +447,7 @@ fn supported_log_rotation_variants_parse() {
         ],
         || {
             for variant in ["daily", "hourly", "minutely", "weekly", "never"] {
-                set_var("LOG_ROTATION", &variant.to_uppercase());
+                set_var("LOG_ROTATION", variant.to_uppercase());
                 let config = AppConfig::from_env().expect("支持的轮转策略应可解析");
                 assert!(rotation_debug(&config.logging.rotation).contains(variant));
             }

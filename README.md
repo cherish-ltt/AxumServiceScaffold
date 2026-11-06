@@ -47,7 +47,7 @@ clone 下来即可跑通。
   参数集中在 `.env`，见 [中间件栈与配置](docs/MIDDLEWARE.md)
 - **客户端保护**：按可信来源 IP 独立限并发、限请求量，跨域保护错误遵循白名单；共享出口共用额度
 - **事务示例**：一次转账完整演示「启动事务 → 读写数据 → 提交 / 回滚」，可按业务 `request_id` 精确查询已提交结果，见 [事务示例](docs/TRANSACTION.md)
-- **JWT 鉴权**：调试登录与当前用户解析，OpenAPI 文档与 Swagger UI 由 `docs` feature 提供（默认关闭，release 也可显式启用）
+- **JWT 鉴权**：调试登录、当前用户解析与可选本地密钥轮换，旧令牌仅在明确截止的重叠窗口内验证，见 [JWT 鉴权与轮换](docs/AUTHENTICATION.md)。OpenAPI 文档与 Swagger UI 由 `docs` feature 提供（默认关闭，release 也可显式启用）
 - **低噪声排障**：每请求一条访问或慢请求诊断，包含可信 IP、请求 ID、路由模板、排队与数据库阶段耗时，
   不记录 query/令牌/请求体；文件日志分批落盘，磁盘故障时缓冲有界并向标准错误告警，部分写入后只重试剩余字节，见 [日志](docs/LOGGING.md)
 - **SeaORM**：连接池、连通性检查、幂等建表与种子数据、仓储适配器
@@ -58,6 +58,7 @@ clone 下来即可跑通。
 - [架构设计](docs/ARCHITECTURE.md)：洋葱架构、目录结构、每层职责
 - [中间件栈与配置](docs/MIDDLEWARE.md)：执行顺序、容量参数、压测调参
 - [事务示例](docs/TRANSACTION.md)：转账参考实现、回滚与幂等验证
+- [JWT 鉴权与轮换](docs/AUTHENTICATION.md)：单密钥兼容、legacy 迁移、准备/切换/退役部署
 - [统一响应结构](docs/RESPONSE.md)：响应体约定
 - [日志](docs/LOGGING.md)：分批落盘、启动配置日志
 - [CLI 命令](docs/CLI.md)：数据库初始化、静态配置预检、离线 OpenAPI 导出
@@ -151,6 +152,12 @@ cargo run --quiet --release --features docs -- --export-openapi > openapi.json
 > 不要在生产环境使用 `.env-example` 中的示例 JWT 密钥。`APP_ENV=production` 必须使用 release
 > 构建，否则拒绝启动，防止误暴露开发认证接口。推荐在网关后运行；TLS、连接/请求头慢速攻击防护、
 > 磁盘配额及跨实例共享限额由部署设施承担，详见 [生产保障边界](docs/MIDDLEWARE.md#生产保障边界)。
+
+JWT 默认继续使用 `JWT_SECRET`，签发无 `kid` 的令牌。需要轮换时可配置 `JWT_KEY_SET` JSON，
+并删除或清空环境和 `.env` 中的 `JWT_SECRET`（包含模板默认值），否则拒绝启动。
+两种模式的模板共用同一个示例密钥，`APP_ENV=production` 均会拒绝，部署前必须替换。
+轮换需要先预分发验证密钥，再切换签发项，最后退役旧项；每个进程只读取一次配置，
+其他未更新实例不会即时撤销旧密钥。字段、截止语义与可执行示例见 [认证说明](docs/AUTHENTICATION.md)。
 
 ## 默认接口
 

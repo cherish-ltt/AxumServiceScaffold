@@ -24,6 +24,7 @@ fn test_config(out_dir: &str, utc_offset_hour: i8, utc_offset_minute: i8) -> App
             sqlx_logging: false,
         },
         jwt: JwtConfig {
+            key_set: None,
             secret: TEST_JWT_SECRET.to_string(),
             issuer: "test-issuer".to_string(),
             audience: "test-audience".to_string(),

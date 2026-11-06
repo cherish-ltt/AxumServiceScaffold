@@ -7,7 +7,8 @@ use axum::response::Response;
 use axum_service_scaffold::container::Container;
 use axum_service_scaffold::create_app::create_app;
 use axum_service_scaffold::infrastructure::config::{
-    AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, MiddlewareConfig, ServerConfig,
+    AppConfig, DatabaseConfig, JwtConfig, JwtKeyConfig, JwtKeySet, LoggingConfig, MiddlewareConfig,
+    ServerConfig,
 };
 use axum_service_scaffold::infrastructure::databases::{connect_database, run_migrations};
 use axum_service_scaffold::infrastructure::repositories::transaction::{
@@ -98,6 +99,7 @@ async fn setup_app_with_config(
         trusted_proxies,
         max_connections,
         2 * 1024 * 1024,
+        None,
     )
     .await
     .0
@@ -108,6 +110,7 @@ async fn setup_app_and_database(
     trusted_proxies: Vec<IpNet>,
     max_connections: u32,
     max_body_bytes: usize,
+    key_set: Option<JwtKeySet>,
 ) -> (Router, sea_orm::DatabaseConnection) {
     let database_url = format!(
         "sqlite://{}?mode=rwc",
@@ -132,7 +135,12 @@ async fn setup_app_and_database(
             sqlx_logging: false,
         },
         jwt: JwtConfig {
-            secret: TEST_JWT_SECRET.to_string(),
+            secret: if key_set.is_some() {
+                String::new()
+            } else {
+                TEST_JWT_SECRET.to_string()
+            },
+            key_set,
             issuer: "test-issuer".to_string(),
             audience: "test-audience".to_string(),
             access_token_ttl_minutes: 120,
@@ -401,6 +409,108 @@ async fn me_rejects_invalid_token() {
 }
 
 #[tokio::test]
+async fn jwt_rotation_http_accepts_overlap_and_rejects_retired_or_misidentified_keys() {
+    const NEW_SECRET: &str = "api-test-new-key-that-is-long-enough";
+    let now = Utc::now().timestamp();
+    let key_set = |old_until| JwtKeySet {
+        current_kid: "B".to_string(),
+        legacy_kid: Some("A".to_string()),
+        keys: vec![
+            JwtKeyConfig {
+                kid: "B".to_string(),
+                secret: NEW_SECRET.to_string(),
+                accept_until: None,
+            },
+            JwtKeyConfig {
+                kid: "A".to_string(),
+                secret: TEST_JWT_SECRET.to_string(),
+                accept_until: Some(old_until),
+            },
+        ],
+    };
+    let claims = json!({
+        "sub": "rotation-user", "username": "alice", "roles": ["developer"],
+        "iss": "test-issuer", "aud": "test-audience", "iat": now, "exp": now + 3600,
+    });
+    let sign = |kid: Option<&str>, secret: &str| {
+        let mut header = JwtHeader::new(Algorithm::HS256);
+        header.kid = kid.map(str::to_string);
+        encode(
+            &header,
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap()
+    };
+    let old = sign(Some("A"), TEST_JWT_SECRET);
+    let legacy = sign(None, TEST_JWT_SECRET);
+    let new = sign(Some("B"), NEW_SECRET);
+    let unknown = sign(Some("unknown"), TEST_JWT_SECRET);
+    let mismatch = sign(Some("B"), TEST_JWT_SECRET);
+    let app = setup_app_and_database(
+        Vec::new(),
+        Vec::new(),
+        2,
+        2 * 1024 * 1024,
+        Some(key_set(now + 3600)),
+    )
+    .await
+    .0;
+
+    #[cfg(debug_assertions)]
+    {
+        let token = issue_dev_token(&app).await;
+        assert_eq!(
+            jsonwebtoken::decode_header(&token).unwrap().kid.as_deref(),
+            Some("B")
+        );
+        let (status, _) = send(app.clone(), get_with_bearer("/api/v1/auth/me", &token)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    for token in [&old, &legacy, &new] {
+        let (status, body) = send(app.clone(), get_with_bearer("/api/v1/auth/me", token)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["data"]["user_id"], "rotation-user");
+    }
+    for token in [&unknown, &mismatch] {
+        let (status, body) = send(app.clone(), get_with_bearer("/api/v1/auth/me", token)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            body["message"],
+            "Unauthorized: access token is invalid or expired"
+        );
+        assert!(!body.to_string().contains(token.as_str()));
+        assert!(!body.to_string().contains(TEST_JWT_SECRET));
+    }
+
+    for config in [
+        key_set(now - 1),
+        JwtKeySet {
+            current_kid: "B".to_string(),
+            legacy_kid: None,
+            keys: vec![JwtKeyConfig {
+                kid: "B".to_string(),
+                secret: NEW_SECRET.to_string(),
+                accept_until: None,
+            }],
+        },
+    ] {
+        let (app, _) =
+            setup_app_and_database(Vec::new(), Vec::new(), 2, 2 * 1024 * 1024, Some(config)).await;
+        for token in [&old, &legacy] {
+            let (status, body) = send(app.clone(), get_with_bearer("/api/v1/auth/me", token)).await;
+            assert_eq!(status, StatusCode::UNAUTHORIZED);
+            assert_eq!(
+                body["message"],
+                "Unauthorized: access token is invalid or expired"
+            );
+        }
+        let (status, _) = send(app, get_with_bearer("/api/v1/auth/me", &new)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+}
+
+#[tokio::test]
 async fn echo_creates_example() {
     let app = setup_app().await;
     let (status, body) = send(
@@ -421,7 +531,7 @@ async fn echo_creates_example() {
 
 #[tokio::test]
 async fn echo_obeys_configured_body_limit() {
-    let (app, _) = setup_app_and_database(Vec::new(), Vec::new(), 2, 4 * 1024 * 1024).await;
+    let (app, _) = setup_app_and_database(Vec::new(), Vec::new(), 2, 4 * 1024 * 1024, None).await;
     let accepted = json!({"title": "large", "note": "x".repeat(3 * 1024 * 1024)});
     let (status, _) = send(app.clone(), post_json("/api/v1/examples/echo", accepted)).await;
     assert_eq!(status, StatusCode::OK);
@@ -990,7 +1100,8 @@ async fn transfer_lookup_recovers_result_and_preserves_database() {
     use axum_service_scaffold::entities::{transfer_account, transfer_audit, transfer_record};
     use sea_orm::{EntityTrait, QueryOrder};
 
-    let (app, database) = setup_app_and_database(Vec::new(), Vec::new(), 2, 2 * 1024 * 1024).await;
+    let (app, database) =
+        setup_app_and_database(Vec::new(), Vec::new(), 2, 2 * 1024 * 1024, None).await;
     let token = issue_dev_token(&app).await;
     for (key, amount) in [
         ("req-target", 2000),
@@ -1142,7 +1253,8 @@ async fn transfer_lookup_recovers_result_and_preserves_database() {
 #[cfg(debug_assertions)]
 #[tokio::test]
 async fn transfer_lookup_rejects_empty_unauthenticated_and_failed_reads() {
-    let (app, database) = setup_app_and_database(Vec::new(), Vec::new(), 2, 2 * 1024 * 1024).await;
+    let (app, database) =
+        setup_app_and_database(Vec::new(), Vec::new(), 2, 2 * 1024 * 1024, None).await;
     let token = issue_dev_token(&app).await;
     let (status, _) = send(
         app.clone(),

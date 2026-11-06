@@ -29,6 +29,7 @@ fn test_config(out_dir: &str) -> AppConfig {
             sqlx_logging: false,
         },
         jwt: JwtConfig {
+            key_set: None,
             secret: TEST_JWT_SECRET.to_string(),
             issuer: "test-issuer".to_string(),
             audience: "test-audience".to_string(),
