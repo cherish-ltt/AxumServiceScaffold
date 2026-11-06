@@ -6,11 +6,10 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use time::{UtcOffset, macros::format_description};
+use time::macros::format_description;
 use tracing::{Event, Subscriber};
 use tracing_appender::rolling::RollingFileAppender;
 use tracing_subscriber::{
-    EnvFilter,
     fmt::{
         self, FmtContext, FormatFields, MakeWriter,
         format::{Format, FormatEvent, Full, Writer},
@@ -32,12 +31,7 @@ use crate::infrastructure::config::AppConfig;
 /// 控制台层保持实时输出。返回的 `BatchGuard` 在 drop 时停止刷盘线程并落盘剩余缓冲。
 pub fn init(config: &AppConfig) -> Result<BatchGuard> {
     // 1. 配置时区和时间格式（东八区 UTC+8）
-    let offset = UtcOffset::from_hms(
-        config.logging.utc_offset_hour,
-        config.logging.utc_offset_minute,
-        config.logging.utc_offset_second,
-    )
-    .context("invalid log timezone offset configuration")?;
+    let offset = config.logging.utc_offset()?;
     let timer = OffsetTime::new(
         offset,
         // 自定义时间格式：年-月-日 时:分:秒.毫秒
@@ -45,8 +39,7 @@ pub fn init(config: &AppConfig) -> Result<BatchGuard> {
     );
 
     // 2. 配置日志过滤级别（来自 .env）。先于文件句柄校验，配置非法时不留下任何副作用。
-    let env_filter = EnvFilter::try_new(config.logging.filter.clone())
-        .with_context(|| format!("invalid LOG_FILTER: {}", config.logging.filter))?;
+    let env_filter = config.logging.env_filter()?;
 
     // 3. 配置日志滚动策略
     let file_appender = RollingFileAppender::builder()

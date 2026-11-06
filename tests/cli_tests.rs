@@ -219,7 +219,13 @@ async fn init_db_reports_schema_failure_without_success_message() {
 
 #[test]
 fn help_and_invalid_arguments_do_not_initialize_resources() {
-    for args in [&["--help"][..], &["--unknown"], &["--init-db", "--init-db"]] {
+    for args in [
+        &["--help"][..],
+        &["--unknown"],
+        &["--init-db", "--init-db"],
+        &["--init-db", "--check-config"],
+        &["--check-config", "--help"],
+    ] {
         let fixture = Fixture::new();
         let output = run(fixture.command(args).env_remove("JWT_SECRET"));
         assert_eq!(output.status.success(), args == ["--help"], "{output:?}");
@@ -252,6 +258,166 @@ fn init_db_preserves_runtime_guard() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("release build"));
         assert!(!fixture.directory.join("application.db").exists());
     }
+}
+
+#[test]
+fn check_config_does_not_access_runtime_resources() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.directory.join("blocked-log-path"),
+        b"existing log file",
+    )
+    .unwrap();
+    fs::write(
+        fixture.directory.join("application.db"),
+        b"existing database bytes",
+    )
+    .unwrap();
+    for url in [
+        "sqlite://missing/read-only.db?mode=ro",
+        "sqlite://application.db?mode=rwc",
+    ] {
+        let output = run(fixture
+            .command(&["--check-config"])
+            .env("DATABASE_URL", url)
+            .env("LOG_OUT_DIR", "blocked-log-path"));
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Static configuration valid"));
+        assert!(!fixture.directory.join("missing").exists());
+        assert!(!fixture.directory.join("logs").exists());
+        assert_eq!(
+            fs::read(fixture.directory.join("application.db")).unwrap(),
+            b"existing database bytes"
+        );
+        assert_eq!(
+            fs::read(fixture.directory.join("blocked-log-path")).unwrap(),
+            b"existing log file"
+        );
+    }
+}
+
+#[test]
+fn check_config_and_startup_share_static_rejections() {
+    for (key, value, expected) in [
+        ("JWT_SECRET", "short", "JWT_SECRET"),
+        ("SERVER_HOST", "not-an-ip", "SERVER_HOST"),
+        ("MIDDLEWARE_MAX_CONCURRENCY", "0", "capacity"),
+        (
+            "LOG_FILTER",
+            "private-filter-do-not-print=notalevel",
+            "LOG_FILTER",
+        ),
+        ("LOG_UTC_OFFSET_MINUTE", "99", "timezone offset"),
+        (
+            "DATABASE_URL",
+            "sqlite::memory:?cache=private",
+            "shared cache",
+        ),
+        (
+            "DATABASE_URL",
+            "private-database-url-do-not-print",
+            "DATABASE_URL",
+        ),
+        (
+            "DATABASE_URL",
+            "sqlite://?mode=memory&cache=shared",
+            "shared file: URI",
+        ),
+        (
+            "DATABASE_URL",
+            "sqlite://named?mode=memory&cache=shared",
+            "shared file: URI",
+        ),
+        (
+            "DATABASE_URL",
+            "sqlite://%3Amemory%3A?cache=shared",
+            "shared file: URI",
+        ),
+    ] {
+        for args in [&["--check-config"][..], &[]] {
+            let fixture = Fixture::new();
+            let output = run(fixture.command(args).env(key, value));
+            assert!(!output.status.success(), "{key}: {output:?}");
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(error.contains(expected), "{key}: {output:?}");
+            assert!(!error.contains("do-not-print"), "{output:?}");
+            assert!(output.stdout.is_empty(), "{output:?}");
+            assert!(!fixture.directory.join("application.db").exists());
+            assert!(!fixture.directory.join("logs").exists());
+        }
+    }
+    let fixture = Fixture::new();
+    let output = run(fixture
+        .command(&["--check-config"])
+        .env_remove("JWT_SECRET"));
+    assert!(!output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("JWT_SECRET"));
+}
+
+#[cfg(unix)]
+#[test]
+fn check_config_does_not_echo_non_unicode_secret() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let fixture = Fixture::new();
+    let mut secret = b"private-key-bytes-do-not-print".to_vec();
+    secret.push(0xff);
+    let output = run(fixture
+        .command(&["--check-config"])
+        .env("JWT_SECRET", OsString::from_vec(secret)));
+    assert!(!output.status.success(), "{output:?}");
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("JWT_SECRET"), "{error}");
+    assert!(!error.contains("do-not-print"), "{error}");
+    assert!(output.stdout.is_empty());
+    assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
+}
+
+#[test]
+fn check_config_accepts_shared_memory_and_preserves_build_guard() {
+    for url in [
+        "sqlite::memory:",
+        "sqlite:file:cli-check?mode=memory&cache=shared",
+        "sqlite::memory:?cache=private&mode=memory",
+    ] {
+        let fixture = Fixture::new();
+        let output = run(fixture
+            .command(&["--check-config"])
+            .env("DATABASE_URL", url));
+        assert!(output.status.success(), "{url}: {output:?}");
+        assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
+    }
+    let fixture = Fixture::new();
+    let output = run(fixture
+        .command(&["--check-config"])
+        .env("APP_ENV", "production"));
+    assert_eq!(
+        output.status.success(),
+        !cfg!(debug_assertions),
+        "{output:?}"
+    );
+    assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
+}
+
+#[test]
+fn check_config_loads_dotenv_with_environment_precedence() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.directory.join(".env"),
+        "JWT_SECRET=dotenv-config-test-signing-key-long-enough\nLOG_UTC_OFFSET_MINUTE=99\n",
+    )
+    .unwrap();
+    let output = run(fixture
+        .command(&["--check-config"])
+        .env_remove("JWT_SECRET"));
+    assert!(!output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("timezone offset"));
+    let output = run(fixture
+        .command(&["--check-config"])
+        .env_remove("JWT_SECRET")
+        .env("LOG_UTC_OFFSET_MINUTE", "0"));
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 1);
 }
 
 #[cfg(unix)]

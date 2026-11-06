@@ -9,24 +9,8 @@ use crate::infrastructure::config::DatabaseConfig;
 pub mod schema;
 
 pub async fn connect_database(config: &DatabaseConfig) -> Result<DatabaseConnection> {
-    let url = config
-        .url
-        .trim_start_matches("sqlite://")
-        .trim_start_matches("sqlite:");
-    let (name, params) = url.split_once('?').unwrap_or((url, ""));
-    let mut in_memory = name == ":memory:";
-    let mut shared = in_memory;
-    for (key, value) in url::form_urlencoded::parse(params.as_bytes()) {
-        if key == "mode" && value == "memory" {
-            in_memory = true;
-            shared = true;
-        } else if key == "cache" {
-            shared = value == "shared";
-        }
-    }
-    if in_memory {
-        anyhow::ensure!(shared, "in-memory SQLite requires shared cache");
-    }
+    config.validate()?;
+    let in_memory = config.is_in_memory()?;
     let mut options = ConnectOptions::new(config.url.clone());
     options
         .min_connections(config.min_connections)
