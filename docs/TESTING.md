@@ -19,6 +19,15 @@ cargo test --features docs
 `--all-features` 等价于启用 `preset`、`http-client`、`docs` 三个可选 feature，
 因此 `--all-features` 会比 CI 多编译一批预置库。）
 
+CLI 进程测试分别验证 debug/release 与 docs 开关的四种组合：
+
+```bash
+cargo test --test cli_tests
+cargo test --features docs --test cli_tests
+cargo test --release --test cli_tests
+cargo test --release --features docs --test cli_tests
+```
+
 这样可以同时确认：
 
 - 启用 `docs` feature 时 Swagger 与 OpenAPI 文档正常（开发用 `cargo run --features docs`）；
@@ -37,6 +46,20 @@ cargo test --features docs
 回滚这类“写了一半”的行为应当有测试兜底：可参考
 `services/transaction.rs` 的单测（在事务内主动失败后断言数据库无残留）与
 `tests/api_tests.rs` 中的 `transfer_rolls_back_every_write_when_force_fail_is_on`。
+
+## CLI 进程测试
+
+`tests/cli_tests.rs` 在独立临时目录启动真实二进制，清理业务环境变量并使用隔离的 SQLite 文件，
+不读取开发者的 `.env`。它覆盖：
+
+- `--init-db` 新库、老库补列与索引、幂等种子、保留业务数据、内存库与失败退出；服务端口被占用时仍能初始化。
+- `--check-config` 与正常启动复用静态拒绝规则，dotenv 与进程环境优先级、密钥不回显，以及既有文件不变。
+- `--export-openapi` 在缺失或无效业务配置时输出纯 JSON，与相同构建的 HTTP 文档完全一致；验证 docs
+  开关、开发路径裁剪、互斥参数及 Unix 标准输出写入失败。
+- 无参数启动的真实 HTTP 健康响应，以及 Unix 下的 Ctrl-C/SIGTERM 优雅关闭。
+
+`tests/database_tests.rs` 同时持有两条连接验证受支持内存库的迁移与种子均可见，并验证非法或私有内存 URL
+在连接前返回错误。CLI 测试保留覆盖率运行器的 `LLVM_PROFILE_FILE`，以记录子进程执行路径。
 
 ## HTTP 黑盒测试（`oneshot`）
 

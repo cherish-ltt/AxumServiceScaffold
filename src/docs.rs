@@ -247,7 +247,7 @@ struct ApiDoc;
 ))]
 struct DevApiDoc;
 
-fn openapi_document() -> utoipa::openapi::OpenApi {
+pub fn openapi_document() -> utoipa::openapi::OpenApi {
     let document = ApiDoc::openapi();
 
     #[cfg(debug_assertions)]

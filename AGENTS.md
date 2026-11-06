@@ -380,6 +380,9 @@ msrv = "1.99.0"
 - 内存池必须使用受支持的共享 `file:` URI（`sqlite::memory:` 由 SQLx 自动转换）；空名称、普通名称
   加 `mode=memory` 和编码后的裸 `:memory:` 在多连接下实际私有，静态检查与连接入口均拒绝。
   受支持形式的测试必须同时持有两条真实连接，并断言两侧均可见迁移及种子。
+- `--export-openapi` 在 dotenv 与业务配置加载前执行，复用 `docs::openapi_document`，stdout 只能输出
+  一个 JSON 文档；写入及 flush 失败必须非零退出。未启用 `docs` 时明确拒绝，不回退到服务启动。
+  CLI 与 HTTP 文档须在同一构建模式下完全一致，开发路径继续由 `debug_assertions` 裁剪。
 
 ### 10.12 监听地址
 

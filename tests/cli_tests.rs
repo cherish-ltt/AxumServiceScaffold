@@ -65,11 +65,13 @@ impl Drop for Fixture {
 
 fn run(command: &mut Command) -> Output {
     let mut child = command.spawn().unwrap();
-    let mut stdout = child.stdout.take().unwrap();
+    let stdout = child.stdout.take();
     let mut stderr = child.stderr.take().unwrap();
     let stdout_reader = thread::spawn(move || {
         let mut bytes = Vec::new();
-        stdout.read_to_end(&mut bytes).unwrap();
+        if let Some(mut stdout) = stdout {
+            stdout.read_to_end(&mut bytes).unwrap();
+        }
         bytes
     });
     let stderr_reader = thread::spawn(move || {
@@ -225,6 +227,9 @@ fn help_and_invalid_arguments_do_not_initialize_resources() {
         &["--init-db", "--init-db"],
         &["--init-db", "--check-config"],
         &["--check-config", "--help"],
+        &["--export-openapi", "--init-db"],
+        &["--check-config", "--export-openapi"],
+        &["--help", "--export-openapi"],
     ] {
         let fixture = Fixture::new();
         let output = run(fixture.command(args).env_remove("JWT_SECRET"));
@@ -418,6 +423,96 @@ fn check_config_loads_dotenv_with_environment_precedence() {
         .env("LOG_UTC_OFFSET_MINUTE", "0"));
     assert!(output.status.success(), "{output:?}");
     assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 1);
+}
+
+#[cfg(feature = "docs")]
+#[tokio::test]
+async fn export_openapi_without_config_matches_http_document() {
+    use axum::{Router, body::Body, http::Request};
+    use http_body_util::BodyExt;
+    use serde_json::Value;
+    use tower::ServiceExt;
+
+    let fixture = Fixture::new();
+    let output = run(fixture
+        .command(&["--export-openapi"])
+        .env_remove("JWT_SECRET")
+        .env("APP_ENV", "production")
+        .env("DATABASE_URL", "invalid-database-url")
+        .env("SERVER_HOST", "invalid-server-address")
+        .env("LOG_FILTER", "invalid=not-a-level"));
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let exported: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let response = axum_service_scaffold::docs::mount(Router::new())
+        .oneshot(
+            Request::builder()
+                .uri("/api-doc/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let served: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(exported, served);
+    assert_eq!(exported["info"]["version"], env!("CARGO_PKG_VERSION"));
+    for path in [
+        "/api/v1/auth/dev-login",
+        "/api/v1/transactions/dev-transfer",
+    ] {
+        assert_eq!(
+            exported["paths"].get(path).is_some(),
+            cfg!(debug_assertions),
+            "{path}"
+        );
+    }
+    assert!(exported["paths"].get("/api/v1/system/health").is_some());
+    assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
+}
+
+#[cfg(not(feature = "docs"))]
+#[test]
+fn export_openapi_requires_docs_before_loading_configuration() {
+    let fixture = Fixture::new();
+    let output = run(fixture
+        .command(&["--export-openapi"])
+        .env_remove("JWT_SECRET")
+        .env("APP_ENV", "production")
+        .env("DATABASE_URL", "invalid-database-url"));
+    assert!(!output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("--export-openapi requires the docs feature"),
+        "{error}"
+    );
+    assert!(!error.contains("JWT_SECRET"), "{error}");
+    assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
+}
+
+#[cfg(all(feature = "docs", unix))]
+#[test]
+fn export_openapi_reports_stdout_failure() {
+    use std::os::{fd::OwnedFd, unix::net::UnixStream};
+
+    let fixture = Fixture::new();
+    let (writer, reader) = UnixStream::pair().unwrap();
+    drop(reader);
+    let descriptor: OwnedFd = writer.into();
+    let output = run(fixture
+        .command(&["--export-openapi"])
+        .env_remove("JWT_SECRET")
+        .stdout(Stdio::from(descriptor)));
+    assert!(!output.status.success(), "{output:?}");
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains("failed to write OpenAPI document"),
+        "{error}"
+    );
+    assert!(!error.contains("panicked"), "{error}");
+    assert_eq!(fs::read_dir(&fixture.directory).unwrap().count(), 0);
 }
 
 #[cfg(unix)]

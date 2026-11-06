@@ -60,6 +60,7 @@ clone 下来即可跑通。
 - [事务示例](docs/TRANSACTION.md)：转账参考实现、回滚与幂等验证
 - [统一响应结构](docs/RESPONSE.md)：响应体约定
 - [日志](docs/LOGGING.md)：分批落盘、启动配置日志
+- [CLI 命令](docs/CLI.md)：数据库初始化、静态配置预检、离线 OpenAPI 导出
 - [测试与构建检查](docs/TESTING.md)：构建检查命令、黑盒测试约定
 - [扩展开发](docs/DEVELOPMENT.md)：新增模块步骤、内置工具、预置依赖
 - [更新日志](docs/CHANGELOG.md)
@@ -127,7 +128,19 @@ cargo run --release -- --check-config
 共享缓存约束。通过时退出 0；失败时标准错误说明规则并返回非零。不连接数据库、不创建日志、不监听端口；
 通过仅代表静态规则合法，仍需在实际启动时确认数据库可达、目录可写和端口可绑定。
 
-健康检查语义：
+### 离线导出 OpenAPI
+
+```bash
+cargo run --quiet --release --features docs -- --export-openapi > openapi.json
+```
+
+标准输出仅包含一个 OpenAPI JSON 文档，与相同构建的 `/api-doc/openapi.json` 内容一致。
+命令不读取 `.env` 或业务配置，不连接数据库、不初始化日志或监听 HTTP，适用于 CI 文档产物。
+必须显式启用 `docs`；release 文档不含调试登录和调试转账路径，debug 文档包含这些路径。
+未启用 `docs`、参数冲突或输出失败时返回非零并向标准错误说明原因。
+导出成功不代表接口契约已全面验证；使用边界见 [CLI 命令](docs/CLI.md)。
+
+### 健康检查
 
 - `/api/v1/system/health`：进程存活检查，固定返回 `200` 且 `database_status` 为 `not_checked`，
   不查询数据库；它只证明进程还能响应 HTTP，**不代表依赖已就绪**，

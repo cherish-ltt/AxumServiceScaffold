@@ -32,6 +32,9 @@ async fn main() -> Result<()> {
         cli::print_help();
         return Ok(());
     }
+    if command == cli::Command::ExportOpenApi {
+        return cli::export_openapi();
+    }
     dotenv().ok();
 
     let config = AppConfig::from_env()?;
