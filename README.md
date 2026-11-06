@@ -106,6 +106,17 @@ cargo run
 `http://127.0.0.1:8080/swagger-ui` 与 `http://127.0.0.1:8080/api-doc/openapi.json`。服务收到 Ctrl-C 或 SIGTERM
 后会停止接收新请求并优雅关闭。
 
+### 一次性初始化数据库
+
+```bash
+cargo run --release -- --init-db
+```
+
+`--init-db` 使用相同 `.env` 和进程环境配置，执行迁移、老库补列/索引及演示账户播种，
+关闭连接池后退出；不初始化日志文件、JWT 服务或 HTTP 监听。它会修改持久 SQLite 数据库，
+拒绝内存库，仍要求完整配置有效。重复执行保留现有余额、版本、流水和审计；失败返回非零，
+不保证整个初始化过程原子回滚。无参数启动仍自动初始化数据库。详细说明见 [CLI 命令](docs/CLI.md)。
+
 健康检查语义：
 
 - `/api/v1/system/health`：进程存活检查，固定返回 `200` 且 `database_status` 为 `not_checked`，

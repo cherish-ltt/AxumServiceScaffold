@@ -7,6 +7,8 @@ use mimalloc::MiMalloc;
 use std::sync::Arc;
 use tracing::info;
 
+mod cli;
+
 /// 全局内存分配器。
 ///
 /// 对于长期运行的 Web 服务，统一分配器有助于保持行为稳定。
@@ -25,10 +27,18 @@ static GLOBAL: MiMalloc = MiMalloc;
 /// 6. 启动 HTTP 服务
 #[tokio::main]
 async fn main() -> Result<()> {
+    let command = cli::Command::parse()?;
+    if command == cli::Command::Help {
+        cli::print_help();
+        return Ok(());
+    }
     dotenv().ok();
 
     let config = AppConfig::from_env()?;
     config.validate_runtime()?;
+    if command == cli::Command::InitDb {
+        return cli::init_database(&config).await;
+    }
     let _log_guard = logging::init(&config)?;
     logging::log_startup_config(&config);
 
