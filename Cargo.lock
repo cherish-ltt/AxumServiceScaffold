@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "axum-service-scaffold"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "argon2",
