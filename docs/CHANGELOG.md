@@ -7,7 +7,16 @@
 
 ## [Unreleased]
 
-无
+### 新增
+
+- 转账列表支持可选业务 `request_id` 原值精确过滤，过滤先于分页，空值返回 400；可用于查询
+  响应丢失后的已提交流水，保留重复 POST 的 409 与回滚语义，无需数据库迁移。
+- `TransferQuery` 新增 `request_id` 字段；`TransferUseCase::list_transfers` 与仓储
+  `count_records` / `list_records` 增加过滤参数，Rust 调用者与自定义实现需同步，未过滤传 `None`。
+
+### 修复
+
+- OpenAPI 将转账列表的 `page`、`size` 与 `request_id` 明确标记为可选查询参数。
 
 ## [0.9.0] - 2026-11-01
 

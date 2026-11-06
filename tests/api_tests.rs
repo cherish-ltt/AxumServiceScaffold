@@ -93,21 +93,22 @@ async fn setup_app_with_config(
     trusted_proxies: Vec<IpNet>,
     max_connections: u32,
 ) -> Router {
-    setup_app_with_body_limit(
+    setup_app_and_database(
         cors_allowed_origins,
         trusted_proxies,
         max_connections,
         2 * 1024 * 1024,
     )
     .await
+    .0
 }
 
-async fn setup_app_with_body_limit(
+async fn setup_app_and_database(
     cors_allowed_origins: Vec<String>,
     trusted_proxies: Vec<IpNet>,
     max_connections: u32,
     max_body_bytes: usize,
-) -> Router {
+) -> (Router, sea_orm::DatabaseConnection) {
     let database_url = format!(
         "sqlite://{}?mode=rwc",
         std::env::temp_dir()
@@ -169,7 +170,8 @@ async fn setup_app_with_body_limit(
     };
 
     let container = Container::bootstrap(config).await.expect("容器装配成功");
-    create_app(Arc::new(container))
+    let database = container.database.clone();
+    (create_app(Arc::new(container)), database)
 }
 
 async fn send_response(app: Router, mut request: Request<Body>) -> Response {
@@ -419,7 +421,7 @@ async fn echo_creates_example() {
 
 #[tokio::test]
 async fn echo_obeys_configured_body_limit() {
-    let app = setup_app_with_body_limit(Vec::new(), Vec::new(), 2, 4 * 1024 * 1024).await;
+    let (app, _) = setup_app_and_database(Vec::new(), Vec::new(), 2, 4 * 1024 * 1024).await;
     let accepted = json!({"title": "large", "note": "x".repeat(3 * 1024 * 1024)});
     let (status, _) = send(app.clone(), post_json("/api/v1/examples/echo", accepted)).await;
     assert_eq!(status, StatusCode::OK);
@@ -980,6 +982,212 @@ async fn transfer_list_paginates_and_rejects_bad_paging() {
 
     let (status, _) = send(app, get_with_bearer("/api/v1/transactions?page=0", &token)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn transfer_lookup_recovers_result_and_preserves_database() {
+    use axum_service_scaffold::entities::{transfer_account, transfer_audit, transfer_record};
+    use sea_orm::{EntityTrait, QueryOrder};
+
+    let (app, database) = setup_app_and_database(Vec::new(), Vec::new(), 2, 2 * 1024 * 1024).await;
+    let token = issue_dev_token(&app).await;
+    for (key, amount) in [
+        ("req-target", 2000),
+        ("req-target-extra", 1000),
+        ("REQ-TARGET", 1000),
+        (" req-target ", 1000),
+        ("req' OR 1=1 --", 1000),
+    ] {
+        let (status, _) = send(
+            app.clone(),
+            post_json_with_bearer(
+                DEV_TRANSFER,
+                &token,
+                transfer_body_with_request_id(amount, key),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let (status, _) = send(
+        app.clone(),
+        post_json_with_bearer(DEV_TRANSFER, &token, transfer_body(1000)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let mut rolled_back = transfer_body_with_request_id(1000, "req-rolled-back");
+    rolled_back["force_fail"] = json!(true);
+    let (status, _) = send(
+        app.clone(),
+        post_json_with_bearer(DEV_TRANSFER, &token, rolled_back),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+
+    let accounts = transfer_account::Entity::find()
+        .order_by_asc(transfer_account::Column::Id)
+        .all(&database)
+        .await
+        .unwrap();
+    let records = transfer_record::Entity::find()
+        .order_by_asc(transfer_record::Column::Id)
+        .all(&database)
+        .await
+        .unwrap();
+    let audits = transfer_audit::Entity::find()
+        .order_by_asc(transfer_audit::Column::Id)
+        .all(&database)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        let (status, list) = send(
+            app.clone(),
+            get_with_bearer(
+                "/api/v1/transactions?request_id=req-target&page=1&size=1",
+                &token,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list["data"]["total"], 1);
+        assert_eq!(list["data"]["items"].as_array().unwrap().len(), 1);
+        let record = &list["data"]["items"][0];
+        assert_eq!(record["request_id"], "req-target");
+        assert_eq!(record["amount_cents"], 2000);
+        assert_eq!(record["from_balance_after_cents"], 98000);
+        assert_eq!(record["to_balance_after_cents"], 102000);
+        let record_id = record["record_id"].as_str().unwrap();
+        let (status, detail) = send(
+            app.clone(),
+            get_with_bearer(&format!("/api/v1/transactions/{record_id}"), &token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(&detail["data"]["record"], record);
+        assert_eq!(detail["data"]["audits"].as_array().unwrap().len(), 2);
+    }
+
+    for (key, page, total) in [
+        ("req-missing", 1, 0),
+        ("req-rolled-back", 1, 0),
+        ("req-target", 2, 1),
+    ] {
+        let (status, list) = send(
+            app.clone(),
+            get_with_bearer(
+                &format!("/api/v1/transactions?request_id={key}&page={page}&size=1"),
+                &token,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list["data"]["total"], total);
+        assert!(list["data"]["items"].as_array().unwrap().is_empty());
+    }
+    for (encoded, original) in [
+        ("REQ-TARGET", "REQ-TARGET"),
+        ("%20req-target%20", " req-target "),
+        ("req%27%20OR%201%3D1%20--", "req' OR 1=1 --"),
+    ] {
+        let (status, list) = send(
+            app.clone(),
+            get_with_bearer(
+                &format!("/api/v1/transactions?request_id={encoded}"),
+                &token,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list["data"]["total"], 1);
+        assert_eq!(list["data"]["items"][0]["request_id"], original);
+    }
+    let (status, list) = send(app, get_with_bearer("/api/v1/transactions", &token)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["data"]["total"], 6);
+    assert!(
+        list["data"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["request_id"].is_null())
+    );
+    assert_eq!(
+        accounts,
+        transfer_account::Entity::find()
+            .order_by_asc(transfer_account::Column::Id)
+            .all(&database)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        records,
+        transfer_record::Entity::find()
+            .order_by_asc(transfer_record::Column::Id)
+            .all(&database)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        audits,
+        transfer_audit::Entity::find()
+            .order_by_asc(transfer_audit::Column::Id)
+            .all(&database)
+            .await
+            .unwrap()
+    );
+}
+
+#[cfg(debug_assertions)]
+#[tokio::test]
+async fn transfer_lookup_rejects_empty_unauthenticated_and_failed_reads() {
+    let (app, database) = setup_app_and_database(Vec::new(), Vec::new(), 2, 2 * 1024 * 1024).await;
+    let token = issue_dev_token(&app).await;
+    let (status, _) = send(
+        app.clone(),
+        get("/api/v1/transactions?request_id=req-target"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, body) = send(
+        app.clone(),
+        get_with_bearer("/api/v1/transactions?request_id=", &token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["message"], "Bad request: request_id must not be empty");
+
+    sqlx::query("DROP TABLE transfer_records")
+        .execute(database.get_sqlite_connection_pool())
+        .await
+        .unwrap();
+    let (status, body) = send(
+        app,
+        get_with_bearer("/api/v1/transactions?request_id=req-target", &token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body["message"], "Internal server error");
+    assert!(body.get("data").is_none());
+}
+
+#[cfg(feature = "docs")]
+#[tokio::test]
+async fn transfer_lookup_is_documented_as_optional_query() {
+    let (status, document) = send(setup_app().await, get("/api-doc/openapi.json")).await;
+    assert_eq!(status, StatusCode::OK);
+    let parameters = document["paths"]["/api/v1/transactions"]["get"]["parameters"]
+        .as_array()
+        .unwrap();
+    for name in ["page", "size", "request_id"] {
+        let parameter = parameters
+            .iter()
+            .find(|parameter| parameter["name"] == name)
+            .expect("分页与业务键查询参数应出现在 OpenAPI 中");
+        assert_eq!(parameter["in"], "query");
+        assert_eq!(parameter["required"], false);
+    }
 }
 
 #[cfg(debug_assertions)]

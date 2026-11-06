@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::Local;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, QuerySelect, Set, sea_query::Expr,
+    QueryOrder, QuerySelect, Select, Set, sea_query::Expr,
 };
 
 use crate::{
@@ -65,7 +65,7 @@ pub trait TransferRepository: Send + Sync {
     where
         C: ConnectionTrait;
 
-    async fn count_records<C>(&self, db: &C) -> Result<u64, AppError>
+    async fn count_records<C>(&self, db: &C, request_id: Option<&str>) -> Result<u64, AppError>
     where
         C: ConnectionTrait;
 
@@ -74,6 +74,7 @@ pub trait TransferRepository: Send + Sync {
         db: &C,
         page: u64,
         size: u64,
+        request_id: Option<&str>,
     ) -> Result<Vec<TransferRecordView>, AppError>
     where
         C: ConnectionTrait;
@@ -206,11 +207,11 @@ impl TransferRepository for SeaOrmTransferRepository {
         Ok(audits.into_iter().map(TransferAuditView::from).collect())
     }
 
-    async fn count_records<C>(&self, db: &C) -> Result<u64, AppError>
+    async fn count_records<C>(&self, db: &C, request_id: Option<&str>) -> Result<u64, AppError>
     where
         C: ConnectionTrait,
     {
-        let total = transfer_record::Entity::find().count(db).await?;
+        let total = transfer_records_query(request_id).count(db).await?;
 
         Ok(total)
     }
@@ -220,6 +221,7 @@ impl TransferRepository for SeaOrmTransferRepository {
         db: &C,
         page: u64,
         size: u64,
+        request_id: Option<&str>,
     ) -> Result<Vec<TransferRecordView>, AppError>
     where
         C: ConnectionTrait,
@@ -232,7 +234,7 @@ impl TransferRepository for SeaOrmTransferRepository {
             .ok_or_else(|| {
                 AppError::bad_request("pagination offset exceeds the representable range")
             })?;
-        let records = transfer_record::Entity::find()
+        let records = transfer_records_query(request_id)
             .order_by_desc(transfer_record::Column::CreatedAt)
             .offset(offset)
             .limit(size)
@@ -240,6 +242,14 @@ impl TransferRepository for SeaOrmTransferRepository {
             .await?;
 
         Ok(records.into_iter().map(TransferRecordView::from).collect())
+    }
+}
+
+fn transfer_records_query(request_id: Option<&str>) -> Select<transfer_record::Entity> {
+    let query = transfer_record::Entity::find();
+    match request_id {
+        Some(request_id) => query.filter(transfer_record::Column::RequestId.eq(request_id)),
+        None => query,
     }
 }
 

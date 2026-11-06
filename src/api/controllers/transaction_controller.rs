@@ -48,8 +48,8 @@ pub fn router() -> Router<Arc<Container>> {
         ("bearer_auth" = [])
     ),
     responses(
-        (status = 200, description = "Transfer records fetched (paginated)", body = DocTransferListResponse),
-        (status = 400, description = "Invalid pagination parameters", body = DocErrorResponse),
+        (status = 200, description = "Transfer records fetched (filtered before pagination)", body = DocTransferListResponse),
+        (status = 400, description = "Invalid pagination or empty request_id", body = DocErrorResponse),
         (status = 401, description = "Unauthorized or invalid token", body = DocErrorResponse)
     )
 ))]
@@ -60,7 +60,7 @@ pub async fn list_transfers(
 ) -> Result<ApiResponse<TransferListResponse>, AppError> {
     let page = container
         .transfer_service
-        .list_transfers(query.page, query.size)
+        .list_transfers(query.page, query.size, query.request_id)
         .await?;
 
     Ok(ApiResponse::ok(page.into()))

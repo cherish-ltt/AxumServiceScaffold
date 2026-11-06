@@ -22,7 +22,7 @@ services/transaction.rs
 | --- | --- | --- |
 | `POST` | `/api/v1/transactions/dev-transfer` | 执行转账事务，仅调试构建注册 |
 | `GET` | `/api/v1/transactions/{id}` | 流水详情 + 同一事务写入的审计日志 |
-| `GET` | `/api/v1/transactions` | 流水分页（`page` 1~10000、`size` 上限 100） |
+| `GET` | `/api/v1/transactions` | 可选 `request_id` 精确过滤后分页（`page` 1~10000、`size` 上限 100） |
 
 调试构建下的完整调用流程：
 
@@ -59,6 +59,36 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/transactions/dev-transfer \
 curl -s "http://127.0.0.1:8080/api/v1/transactions?page=1&size=10" -H "Authorization: Bearer $TOKEN"
 curl -s "http://127.0.0.1:8080/api/v1/transactions/<record_id>" -H "Authorization: Bearer $TOKEN"
 ```
+
+### 响应丢失后按业务请求 ID 查结果
+
+调用方应在提交转账前保存业务 `request_id`。如果写入响应丢失，可使用同一个键查询：
+
+```bash
+curl -s --get 'http://127.0.0.1:8080/api/v1/transactions' \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode 'request_id=req-20260927-0001' \
+  --data-urlencode 'page=1' --data-urlencode 'size=1'
+```
+
+`data.total=1` 时，`data.items[0]` 返回已提交的流水、金额、提交后余额和 `record_id`；
+再使用现有详情接口查询其审计记录。此查询不修改账户余额、版本、流水或审计。
+
+- `request_id` 按原值等值匹配，区分大小写和前后空格，不做 trim、模糊匹配或格式转换；
+  使用 URL 编码传递特殊字符。显式传入空字符串返回统一的 `400`，不等同于未传参数。
+- 过滤在分页前执行，`total` 与 `items` 使用相同条件；未知或已回滚的键返回 `total=0` 和
+  `items=[]`。超出结果页时仍返回真实 `total`，只是 `items` 为空。
+- 查不到记录只说明查询时没有可见的匹配流水，**不能证明原写请求已经完成或已回滚**。
+  重复 POST 仍返回 `409` 并回滚重复事务，不会因查询功能改为重放首次成功响应。
+- 不传参数时保持原分页行为，包含历史 `request_id=NULL` 流水；现有唯一索引已支持查询，
+  本次不新增迁移。接口继续要求 Bearer 鉴权，无效令牌返回 `401`，数据库故障返回安全 `500`。
+- 业务键与诊断响应头 `x-request-id` 是两套标识，不会自动互相复制。
+  当前示例中的已认证用户共享演示数据，不提供按用户或租户隔离的授权。
+
+Rust 接口兼容性：`TransferQuery` 新增 `request_id: Option<String>`；
+`TransferUseCase::list_transfers` 在 `page`、`size` 后新增 `Option<String>`，
+`TransferRepository::count_records` 与 `list_records` 末尾新增 `Option<&str>`。
+自定义实现和直接调用者需补上参数；不需要过滤时传 `None`。
 
 约定：
 
