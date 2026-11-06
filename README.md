@@ -46,7 +46,7 @@ clone 下来即可跑通。
 - **HTTP 生产保护栈**：请求 ID / 安全响应头 / CORS 白名单 / 背压 / 限流 / 含排队超时 / Body 限制 / 压缩 / panic 隔离，
   参数集中在 `.env`，见 [中间件栈与配置](docs/MIDDLEWARE.md)
 - **客户端保护**：按可信来源 IP 独立限并发、限请求量，跨域保护错误遵循白名单；共享出口共用额度
-- **事务示例**：一次转账完整演示「启动事务 → 读写数据 → 提交 / 回滚」，见 [事务示例](docs/TRANSACTION.md)
+- **事务示例**：一次转账完整演示「启动事务 → 读写数据 → 提交 / 回滚」，可按业务 `request_id` 精确查询已提交结果，见 [事务示例](docs/TRANSACTION.md)
 - **JWT 鉴权**：调试登录与当前用户解析，OpenAPI 文档与 Swagger UI 由 `docs` feature 提供（默认关闭，release 也可显式启用）
 - **低噪声排障**：每请求一条访问或慢请求诊断，包含可信 IP、请求 ID、路由模板、排队与数据库阶段耗时，
   不记录 query/令牌/请求体；文件日志分批落盘，磁盘故障时缓冲有界并向标准错误告警，部分写入后只重试剩余字节，见 [日志](docs/LOGGING.md)
@@ -129,7 +129,7 @@ cargo run
 - `GET /api/v1/examples`：先按关键词过滤，再按 `page` / `size` 分页，超出末页返回空列表
 - `GET /api/v1/examples/{id}`
 - `POST /api/v1/transactions/dev-transfer`（仅调试构建）
-- `GET /api/v1/transactions`
+- `GET /api/v1/transactions`：可选 `request_id` 精确过滤后分页，空值返回 400
 - `GET /api/v1/transactions/{id}`
 
 ## 备注

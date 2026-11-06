@@ -16,10 +16,11 @@ pub trait TransferUseCase: Send + Sync {
     /// 查询单条流水及其同一事务写入的审计日志。
     async fn get_transfer(&self, record_id: String) -> Result<TransferDetail, AppError>;
 
-    /// 分页查询流水。
+    /// 按可选业务请求 ID 精确过滤后分页查询流水。
     async fn list_transfers(
         &self,
         page: Option<u64>,
         size: Option<u64>,
+        request_id: Option<String>,
     ) -> Result<TransferRecordPage, AppError>;
 }

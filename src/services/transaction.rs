@@ -105,6 +105,7 @@ impl<R: TransferRepository> TransferUseCase for TransferService<R> {
         &self,
         page: Option<u64>,
         size: Option<u64>,
+        request_id: Option<String>,
     ) -> Result<TransferRecordPage, AppError> {
         let page = page.unwrap_or(DEFAULT_PAGE);
         let size = size.unwrap_or(DEFAULT_SIZE);
@@ -118,15 +119,20 @@ impl<R: TransferRepository> TransferUseCase for TransferService<R> {
                 "size must be between 1 and {MAX_SIZE}"
             )));
         }
+        if request_id.as_deref() == Some("") {
+            return Err(AppError::bad_request("request_id must not be empty"));
+        }
 
         let total = measure(
             "db.count_records",
-            self.repository.count_records(&self.database),
+            self.repository
+                .count_records(&self.database, request_id.as_deref()),
         )
         .await?;
         let items = measure(
             "db.list_records",
-            self.repository.list_records(&self.database, page, size),
+            self.repository
+                .list_records(&self.database, page, size, request_id.as_deref()),
         )
         .await?;
 
@@ -656,7 +662,7 @@ mod tests {
         }
 
         let page = service
-            .list_transfers(Some(1), Some(2))
+            .list_transfers(Some(1), Some(2), None)
             .await
             .expect("分页查询");
         assert_eq!(page.page, 1);
@@ -666,7 +672,7 @@ mod tests {
         assert_eq!(page.items[0].amount_cents, 3000);
 
         let remaining = service
-            .list_transfers(Some(2), Some(2))
+            .list_transfers(Some(2), Some(2), None)
             .await
             .expect("第二页");
         assert_eq!(remaining.items.len(), 1);
@@ -678,26 +684,35 @@ mod tests {
         let (service, _database) = setup().await;
 
         assert!(matches!(
-            service.list_transfers(Some(0), None).await,
+            service.list_transfers(Some(0), None, None).await,
             Err(AppError::BadRequest(_))
         ));
         // 页码超过上限直接拒绝，避免 (page - 1) * size 在查询层溢出。
         assert!(matches!(
             service
-                .list_transfers(Some(super::MAX_PAGE + 1), None)
+                .list_transfers(Some(super::MAX_PAGE + 1), None, None)
                 .await,
             Err(AppError::BadRequest(_))
         ));
         assert!(matches!(
-            service.list_transfers(None, Some(0)).await,
+            service.list_transfers(None, Some(0), None).await,
             Err(AppError::BadRequest(_))
         ));
         assert!(matches!(
-            service.list_transfers(None, Some(101)).await,
+            service.list_transfers(None, Some(101), None).await,
+            Err(AppError::BadRequest(_))
+        ));
+        assert!(matches!(
+            service
+                .list_transfers(None, None, Some(String::new()))
+                .await,
             Err(AppError::BadRequest(_))
         ));
         // 不传分页参数时使用默认值：第 1 页、每页 10 条。
-        let page = service.list_transfers(None, None).await.expect("默认分页");
+        let page = service
+            .list_transfers(None, None, None)
+            .await
+            .expect("默认分页");
         assert_eq!((page.page, page.size), (1, 10));
     }
 

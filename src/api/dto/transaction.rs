@@ -180,12 +180,15 @@ impl From<TransferDetail> for TransferDetailResponse {
 }
 
 #[cfg_attr(feature = "docs", derive(IntoParams, ToSchema))]
+#[cfg_attr(feature = "docs", into_params(parameter_in = Query))]
 #[derive(Debug, Deserialize)]
 pub struct TransferQuery {
     #[cfg_attr(feature = "docs", param(example = 1))]
     pub page: Option<u64>,
     #[cfg_attr(feature = "docs", param(example = 10))]
     pub size: Option<u64>,
+    #[cfg_attr(feature = "docs", param(example = "req-20260927-0001"))]
+    pub request_id: Option<String>,
 }
 
 #[cfg_attr(feature = "docs", derive(ToSchema))]
