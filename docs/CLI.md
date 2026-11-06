@@ -45,8 +45,25 @@ cargo run --release -- --check-config
 配置语法合法但数据库不存在、日志路径不可写或端口被占用时仍可以通过。
 检查后配置或环境发生变化也不在本次结果保证范围内。
 
-`--check-config`、`--init-db` 与 `--help` 互斥，混用在读取配置和资源初始化前失败。
+`--check-config`、`--init-db`、`--export-openapi` 与 `--help` 互斥，混用在读取配置和资源初始化前失败。
 无参数仍启动服务，并使用同一静态校验入口；非法日志或私有内存缓存配置会在创建任何运行资源前失败。
+
+## 离线导出 OpenAPI
+
+```bash
+cargo run --quiet --release --features docs -- --export-openapi > openapi.json
+```
+
+该模式在 dotenv 加载、配置解析和资源初始化之前执行；缺少 JWT 配置、数据库不可用或端口已占用
+均不影响导出。命令复用 HTTP `/api-doc/openapi.json` 的同一文档构造入口，不维护第二份接口或 schema。
+标准输出只写入一个可解析的 JSON 文档，不混入日志或完成提示；输出由调用方重定向保存，命令不主动创建文件。
+
+默认 feature 仍不包含 `docs`。未启用时命令向标准错误说明 `requires the docs feature` 并非零退出，
+不会继续启动服务。序列化、标准输出写入或 flush 失败同样非零退出；写入失败时已输出的部分数据
+不能视为完整文档，自动化任务必须检查退出状态。
+
+文档内容反映编译模式：debug + docs 包含 dev-login / dev-transfer 路径，release + docs 裁剪这些路径。
+切换 `APP_ENV` 不改变已编译的文档；推荐发布文档时使用 release + docs。
 
 ## 验证
 
@@ -54,3 +71,5 @@ cargo run --release -- --check-config
 唯一索引、故障退出、不监听 HTTP、静态预检的无副作用与配置来源，以及普通服务的启动和信号关闭。
 测试不会读取本地 `.env`。
 `tests/database_tests.rs` 通过同时持有两条真实连接验证受支持内存库的迁移和演示数据可见性。
+导出测试使用独立进程，验证无配置依赖、纯 JSON、与 HTTP 文档一致、feature 提示、模式冲突及输出失败；
+四种构建组合的检查命令见 [测试与构建检查](TESTING.md)。
