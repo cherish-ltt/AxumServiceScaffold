@@ -155,6 +155,7 @@ cargo run --quiet --release --features docs -- --export-openapi > openapi.json
 
 JWT 默认继续使用 `JWT_SECRET`，签发无 `kid` 的令牌。需要轮换时可配置 `JWT_KEY_SET` JSON，
 并删除或清空环境和 `.env` 中的 `JWT_SECRET`（包含模板默认值），否则拒绝启动。
+两种模式的模板共用同一个示例密钥，`APP_ENV=production` 均会拒绝，部署前必须替换。
 轮换需要先预分发验证密钥，再切换签发项，最后退役旧项；每个进程只读取一次配置，
 其他未更新实例不会即时撤销旧密钥。字段、截止语义与可执行示例见 [认证说明](docs/AUTHENTICATION.md)。
 

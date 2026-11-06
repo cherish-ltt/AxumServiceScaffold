@@ -73,15 +73,30 @@ fn jwt_key_set_example_survives_dotenv_parsing() {
         .lines()
         .find_map(|line| line.trim().strip_prefix("# JWT_KEY_SET="))
         .expect("模板应提供轮换示例");
-    with_env(&[("JWT_SECRET", None), ("JWT_KEY_SET", None)], || {
-        let path = env::temp_dir().join(format!("jwt-template-{}.env", uuid::Uuid::now_v7()));
-        std::fs::write(&path, format!("JWT_KEY_SET={line}\n")).unwrap();
-        let loaded = dotenv::from_path(&path);
-        std::fs::remove_file(&path).unwrap();
-        loaded.expect("示例应遵守 dotenv 语法");
-        let config = AppConfig::from_env().expect("dotenv 读取后仍须为有效轮换配置");
-        assert!(config.jwt.key_set.is_some());
-    });
+    with_env(
+        &[
+            ("APP_ENV", Some("development")),
+            ("JWT_SECRET", None),
+            ("JWT_KEY_SET", None),
+        ],
+        || {
+            let path = env::temp_dir().join(format!("jwt-template-{}.env", uuid::Uuid::now_v7()));
+            std::fs::write(&path, format!("JWT_KEY_SET={line}\n")).unwrap();
+            let loaded = dotenv::from_path(&path);
+            std::fs::remove_file(&path).unwrap();
+            loaded.expect("示例应遵守 dotenv 语法");
+            let config = AppConfig::from_env().expect("dotenv 读取后仍须为有效轮换配置");
+            assert!(config.jwt.key_set.is_some());
+
+            set_var("APP_ENV", "production");
+            let error = AppConfig::from_env().expect_err("生产环境必须拒绝模板中的轮换示例密钥");
+            assert_eq!(
+                error.to_string(),
+                "example JWT_KEY_SET secret is not allowed in production environment"
+            );
+            assert!(!format!("{error:#?}").contains(EXAMPLE_SECRET));
+        },
+    );
 }
 
 #[test]

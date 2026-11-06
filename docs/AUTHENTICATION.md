@@ -48,6 +48,7 @@
 非空 `JWT_SECRET` 与非空 `JWT_KEY_SET` 并存会拒绝启动，不会按优先级静默选择。
 轮换 JSON 的解析错误与配置的 Debug 输出均隐藏密钥；启动快照只报告模式和集合数量。
 写入 `.env` 时用单引号包住整段 JSON，保留 JSON 内的双引号（见 `.env-example`）。
+模板中的轮换示例与 `JWT_SECRET` 使用相同示例密钥，`APP_ENV=production` 下均被拒绝。
 
 ## 准备、切换、退役
 
