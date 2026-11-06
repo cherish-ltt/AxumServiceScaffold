@@ -51,6 +51,27 @@ pub struct DatabaseConfig {
     pub sqlx_logging: bool,
 }
 
+impl DatabaseConfig {
+    pub fn is_in_memory(&self) -> Result<bool> {
+        let options = self
+            .url
+            .parse::<sqlx::sqlite::SqliteConnectOptions>()
+            .map_err(|_| anyhow!("invalid DATABASE_URL: expected valid SQLite options"))?;
+        let location = self
+            .url
+            .trim_start_matches("sqlite://")
+            .trim_start_matches("sqlite:");
+        let (name, params) = location.split_once('?').unwrap_or((location, ""));
+        Ok(name == ":memory:"
+            || matches!(
+                options.get_filename().to_str(),
+                Some(":memory:" | "file::memory:")
+            )
+            || url::form_urlencoded::parse(params.as_bytes())
+                .any(|(key, value)| key == "mode" && value == "memory"))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct JwtConfig {
     pub secret: String,

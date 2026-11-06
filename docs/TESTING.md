@@ -29,8 +29,10 @@ cargo test --features docs
 - 测试和 Clippy 检查通过。
 
 应用启动时通过 `sqlx::migrate!` 执行 `migrations/` 目录下的版本化迁移（记录写进 `_sqlx_migrations` 表），
-在此基础上补齐老库缺列、建索引并幂等播种演示账户。生产环境建议在部署阶段执行明确的迁移脚本，
-不要使用示例 JWT_SECRET。
+在此基础上补齐老库缺列、建索引并幂等播种演示账户。部署时可先运行
+`cargo run --release -- --init-db`，确认退出码为 0 后再无参数启动服务；普通启动仍自动初始化。
+该命令包含演示账户播种，要求完整有效配置且只接受持久 SQLite 数据库，失败不保证全局回滚。
+不要使用示例 JWT_SECRET；详细说明见 [CLI 命令](CLI.md)。
 
 回滚这类“写了一半”的行为应当有测试兜底：可参考
 `services/transaction.rs` 的单测（在事务内主动失败后断言数据库无残留）与

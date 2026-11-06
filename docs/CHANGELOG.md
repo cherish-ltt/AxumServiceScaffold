@@ -13,6 +13,8 @@
   响应丢失后的已提交流水，保留重复 POST 的 409 与回滚语义，无需数据库迁移。
 - `TransferQuery` 新增 `request_id` 字段；`TransferUseCase::list_transfers` 与仓储
   `count_records` / `list_records` 增加过滤参数，Rust 调用者与自定义实现需同步，未过滤传 `None`。
+- 新增 `--init-db` 一次性初始化持久 SQLite 数据库，复用迁移、老库补列/索引与幂等演示账户播种；
+  关闭连接池后退出，不启动日志或 HTTP 服务；拒绝内存库，错误返回非零且不暴露 URL/密钥。
 
 ### 修复
 
