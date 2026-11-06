@@ -414,6 +414,18 @@ msrv = "1.99.0"
 - `Cargo.toml` 中必须保持 `jsonwebtoken = { version = "=11", features = ["aws_lc_rs"] }`，与 rustls 使用的 `aws-lc-rs` 后端保持一致。
 - 升级 `jsonwebtoken` 时需确认其加密后端特性仍然被显式启用。
 
+### 10.14 JWT 密钥轮换
+
+- `JWT_SECRET` 与 `JWT_KEY_SET` 是互斥来源，集合的结构、密钥安全与生产示例限制必须在
+  `AppConfig::from_env` 阶段验证。`JwtService::new` 复用密钥校验，不能只等 HTTP 请求时发现坏配置。
+- 轮换配置最多 4 项，只有当前项签发；验证按 `kid` 精确选一项并固定 HS256，不允许遍历回退、
+  动态文件读取或网络发现。无 `kid` 令牌仅允许显式 legacy 映射；额外项和 legacy 项必须有截止。
+- `accept_until` 为 UTC Unix 秒，`now >= accept_until` 后禁止验证；当前项如有截止，签发也必须
+  拒绝。该边界独立于 JWT 的 `exp` 宽限，测试使用可控时间，不等待真实轮换窗口。
+- 所有 JWT 配置 Debug、解析错误与启动日志必须隐藏密钥，HTTP 认证错误维持安全统一文案。
+- 修改配置时同步 `.env-example`、配置/HTTP/日志测试与 `docs/AUTHENTICATION.md`；公开
+  `JwtConfig` 新增字段时必须同步全部构造点并记录源码兼容成本。用户现有 `.env` 不自动改写。
+
 ### 10.3 双许可协议
 
 - 项目采用 `MIT OR Apache-2.0` 双许可，使用者可任选其一遵循。

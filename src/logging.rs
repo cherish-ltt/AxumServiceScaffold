@@ -145,6 +145,18 @@ pub fn log_startup_config(config: &AppConfig) {
         &dashes,
         "jwt",
         vec![
+            format!(
+                "mode={}",
+                if jwt.key_set.is_some() {
+                    "key_set"
+                } else {
+                    "single_secret"
+                }
+            ),
+            format!(
+                "key_count={}",
+                jwt.key_set.as_ref().map_or(1, |set| set.keys.len())
+            ),
             format!("secret={}", mask_secret(&jwt.secret)),
             format!("issuer={}", jwt.issuer),
             format!("audience={}", jwt.audience),

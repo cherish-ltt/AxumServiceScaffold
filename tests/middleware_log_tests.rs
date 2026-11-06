@@ -86,6 +86,7 @@ async fn request_id_is_correlated_in_logs() {
             Request::builder()
                 .uri("/ping?secret=do-not-log")
                 .header("x-request-id", "log-correlation-id")
+                .header("Authorization", "Bearer complete-token-must-not-be-logged")
                 .body(Body::empty())
                 .expect("构造请求"),
         )
@@ -100,6 +101,7 @@ async fn request_id_is_correlated_in_logs() {
         "正常请求只能一条访问日志: {captured}"
     );
     assert!(!captured.contains("do-not-log"));
+    assert!(!captured.contains("complete-token-must-not-be-logged"));
     assert!(captured.contains("client_ip=127.0.0.1"));
     assert!(captured.contains(r#"route="/ping""#));
     assert!(
@@ -166,6 +168,7 @@ async fn request_id_is_correlated_in_logs() {
             sqlx_logging: false,
         },
         jwt: JwtConfig {
+            key_set: None,
             secret: "diagnostic-test-secret-that-is-long-enough".to_string(),
             issuer: "test-issuer".to_string(),
             audience: "test-audience".to_string(),

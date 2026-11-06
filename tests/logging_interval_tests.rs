@@ -6,7 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use axum_service_scaffold::infrastructure::config::{
-    AppConfig, DatabaseConfig, JwtConfig, LoggingConfig, MiddlewareConfig, ServerConfig,
+    AppConfig, DatabaseConfig, JwtConfig, JwtKeyConfig, JwtKeySet, LoggingConfig, MiddlewareConfig,
+    ServerConfig,
 };
 use axum_service_scaffold::logging;
 use tracing_appender::rolling::Rotation;
@@ -31,6 +32,7 @@ fn test_config(out_dir: &str) -> AppConfig {
             sqlx_logging: false,
         },
         jwt: JwtConfig {
+            key_set: None,
             secret: TEST_JWT_SECRET.to_string(),
             issuer: "test-issuer".to_string(),
             audience: "test-audience".to_string(),
@@ -97,6 +99,26 @@ fn logs_are_flushed_on_fixed_interval() {
 
     // 顺带验证启动配置日志输出了批量参数（log_startup_config 会写入文件）
     logging::log_startup_config(&config);
+    let mut rotation_config = config.clone();
+    rotation_config.jwt.secret.clear();
+    const OTHER_SECRET: &str = "second-logging-test-secret-that-is-long-enough";
+    rotation_config.jwt.key_set = Some(JwtKeySet {
+        current_kid: "B".to_string(),
+        legacy_kid: Some("A".to_string()),
+        keys: vec![
+            JwtKeyConfig {
+                kid: "B".to_string(),
+                secret: OTHER_SECRET.to_string(),
+                accept_until: None,
+            },
+            JwtKeyConfig {
+                kid: "A".to_string(),
+                secret: TEST_JWT_SECRET.to_string(),
+                accept_until: Some(1893456000),
+            },
+        ],
+    });
+    logging::log_startup_config(&rotation_config);
 
     for i in 0..3 {
         tracing::info!("interval flush entry {i}");
@@ -126,5 +148,8 @@ fn logs_are_flushed_on_fixed_interval() {
         logs.contains(&format!("version={}", env!("CARGO_PKG_VERSION"))),
         "启动配置日志应输出版本号:\n{logs}"
     );
+    assert!(logs.contains("mode=single_secret") && logs.contains("mode=key_set"));
+    assert!(logs.contains("key_count=2"));
+    assert!(!logs.contains(TEST_JWT_SECRET) && !logs.contains(OTHER_SECRET));
     drop(guard);
 }

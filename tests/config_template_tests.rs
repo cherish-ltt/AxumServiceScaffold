@@ -7,10 +7,15 @@ use std::collections::BTreeSet;
 const CONFIG_SOURCE: &str = include_str!("../src/infrastructure/config.rs");
 const TEMPLATE: &str = include_str!("../.env-example");
 
-/// 代码里 `parse_env_or` / `get_env_or` / `get_required_env` 的第一个参数即变量名。
+/// 代码里环境变量读取函数的第一个参数即变量名。
 fn keys_read_by_code() -> BTreeSet<String> {
     let mut keys = BTreeSet::new();
-    for function in ["get_required_env(", "get_env_or(", "parse_env_or("] {
+    for function in [
+        "get_required_env(",
+        "get_optional_env(",
+        "get_env_or(",
+        "parse_env_or(",
+    ] {
         let mut rest = CONFIG_SOURCE;
         while let Some(offset) = rest.find(function) {
             // 先跳过空白：形如 `parse_env_or(\n    "KEY",` 的跨行调用同样是字面量。
@@ -84,7 +89,10 @@ fn every_config_key_is_documented_in_the_template() {
 #[test]
 fn only_deliberately_optional_keys_are_commented_out() {
     // HSTS 默认跟随 APP_ENV，写死会覆盖生产环境的默认值，因此以注释形式给出。
-    let expected = BTreeSet::from(["MIDDLEWARE_HSTS_ENABLED".to_string()]);
+    let expected = BTreeSet::from([
+        "MIDDLEWARE_HSTS_ENABLED".to_string(),
+        "JWT_KEY_SET".to_string(),
+    ]);
 
     assert_eq!(
         difference(&commented_keys_in_template(), &expected),

@@ -76,7 +76,8 @@ rg 'request diagnostic|route="/api/v1/transactions/\{id\}"' log/
   取自 `Cargo.toml` 的 `version`（`env!("CARGO_PKG_VERSION")`），发版改 `Cargo.toml` 即自动生效；
 - `DATABASE_URL` 中的口令被替换为 `***`（`user:password@host` 与 `?password=` 两种写法都支持，
   口令里含 `@` 或 `:` 也不会漏出），`JWT_SECRET` 只输出字符数（如 `secret=***(56 chars)`），
-  密钥不会被写进日志；
+  密钥不会被写进日志；轮换模式只报告 `mode=key_set` 与 `key_count`，不展开密钥集合，
+  配置 Debug 和轮换 JSON 的解析错误同样隐藏密钥；
 - 打印时机在日志初始化之后、`Container::bootstrap` 之前（`src/main.rs`），
   因此数据库引导失败时也能看到配置快照。
 
