@@ -35,7 +35,13 @@ async fn main() -> Result<()> {
     dotenv().ok();
 
     let config = AppConfig::from_env()?;
-    config.validate_runtime()?;
+    config.validate_static()?;
+    if command == cli::Command::CheckConfig {
+        println!(
+            "Static configuration valid; database access, file permissions and port availability were not checked."
+        );
+        return Ok(());
+    }
     if command == cli::Command::InitDb {
         return cli::init_database(&config).await;
     }

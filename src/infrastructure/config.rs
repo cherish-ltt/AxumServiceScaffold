@@ -53,22 +53,66 @@ pub struct DatabaseConfig {
 
 impl DatabaseConfig {
     pub fn is_in_memory(&self) -> Result<bool> {
-        let options = self
-            .url
+        let options = self.sqlite_options()?;
+        Ok(self.memory_options().0
+            || matches!(
+                options.get_filename().to_str(),
+                Some(":memory:" | "file::memory:")
+            ))
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        let options = self.sqlite_options()?;
+        let (configured_memory, shared) = self.memory_options();
+        let filename = options.get_filename().to_string_lossy();
+        let in_memory =
+            configured_memory || matches!(filename.as_ref(), ":memory:" | "file::memory:");
+        let supported_url = url::Url::parse(&self.url).is_ok_and(|url| url.scheme() == "sqlite");
+        anyhow::ensure!(
+            !in_memory || shared,
+            "in-memory SQLite requires shared cache"
+        );
+        if in_memory {
+            anyhow::ensure!(
+                filename.starts_with("file:") && filename != "file:",
+                "in-memory SQLite requires a shared file: URI; use sqlite::memory: for an isolated pool"
+            );
+            anyhow::ensure!(
+                supported_url,
+                "invalid in-memory DATABASE_URL; use sqlite::memory: or sqlite:file:name?mode=memory&cache=shared"
+            );
+        } else {
+            anyhow::ensure!(
+                supported_url,
+                "invalid DATABASE_URL: expected a SQLite URL supported by the database driver"
+            );
+        }
+        Ok(())
+    }
+
+    fn sqlite_options(&self) -> Result<sqlx::sqlite::SqliteConnectOptions> {
+        self.url
             .parse::<sqlx::sqlite::SqliteConnectOptions>()
-            .map_err(|_| anyhow!("invalid DATABASE_URL: expected valid SQLite options"))?;
+            .map_err(|_| anyhow!("invalid DATABASE_URL: expected valid SQLite options"))
+    }
+
+    fn memory_options(&self) -> (bool, bool) {
         let location = self
             .url
             .trim_start_matches("sqlite://")
             .trim_start_matches("sqlite:");
         let (name, params) = location.split_once('?').unwrap_or((location, ""));
-        Ok(name == ":memory:"
-            || matches!(
-                options.get_filename().to_str(),
-                Some(":memory:" | "file::memory:")
-            )
-            || url::form_urlencoded::parse(params.as_bytes())
-                .any(|(key, value)| key == "mode" && value == "memory"))
+        let mut in_memory = name == ":memory:";
+        let mut shared = in_memory;
+        for (key, value) in url::form_urlencoded::parse(params.as_bytes()) {
+            if key == "mode" && value == "memory" {
+                in_memory = true;
+                shared = true;
+            } else if key == "cache" {
+                shared = value == "shared";
+            }
+        }
+        (in_memory, shared)
     }
 }
 
@@ -95,6 +139,22 @@ pub struct LoggingConfig {
     pub batch_max_events: usize,
     /// 文件日志批量落盘：最长 N 秒强制写入一次。
     pub batch_flush_interval_secs: u64,
+}
+
+impl LoggingConfig {
+    pub fn utc_offset(&self) -> Result<time::UtcOffset> {
+        time::UtcOffset::from_hms(
+            self.utc_offset_hour,
+            self.utc_offset_minute,
+            self.utc_offset_second,
+        )
+        .context("invalid log timezone offset configuration")
+    }
+
+    pub fn env_filter(&self) -> Result<tracing_subscriber::EnvFilter> {
+        tracing_subscriber::EnvFilter::try_new(&self.filter)
+            .map_err(|_| anyhow!("invalid LOG_FILTER expression"))
+    }
 }
 
 /// HTTP 中间件容量参数，全部集中在 `.env`，业务代码不得内联这些数字。
@@ -129,6 +189,14 @@ pub struct MiddlewareConfig {
 }
 
 impl AppConfig {
+    pub fn validate_static(&self) -> Result<()> {
+        self.validate_runtime()?;
+        self.database.validate()?;
+        self.logging.utc_offset()?;
+        self.logging.env_filter()?;
+        Ok(())
+    }
+
     pub fn validate_runtime(&self) -> Result<()> {
         if self.app_env.eq_ignore_ascii_case("production") && cfg!(debug_assertions) {
             return Err(anyhow!(
@@ -192,7 +260,7 @@ impl AppConfig {
         let scheme = database.url.split(':').next().unwrap_or_default();
         if scheme != "sqlite" {
             return Err(anyhow!(
-                "unsupported DATABASE_URL scheme `{scheme}`: this scaffold only supports sqlite:// URLs"
+                "unsupported DATABASE_URL scheme: this scaffold only supports sqlite:// URLs"
             ));
         }
         if database.connect_timeout_secs == 0 || database.idle_secs == 0 {
@@ -311,7 +379,13 @@ impl AppConfig {
 }
 
 fn get_required_env(key: &str) -> Result<String> {
-    env::var(key).with_context(|| format!("missing required environment variable: {key}"))
+    match env::var(key) {
+        Ok(value) => Ok(value),
+        Err(env::VarError::NotPresent) => {
+            Err(anyhow!("missing required environment variable: {key}"))
+        },
+        Err(env::VarError::NotUnicode(_)) => Err(anyhow!("{key} must contain valid Unicode")),
+    }
 }
 
 fn get_env_or(key: &str, default: &str) -> String {

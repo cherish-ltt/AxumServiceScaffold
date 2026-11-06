@@ -8,6 +8,7 @@ use axum_service_scaffold::infrastructure::{
 pub enum Command {
     Serve,
     InitDb,
+    CheckConfig,
     Help,
 }
 
@@ -18,6 +19,7 @@ impl Command {
         let command = match argument.as_deref() {
             None => Self::Serve,
             Some(value) if value == "--init-db" => Self::InitDb,
+            Some(value) if value == "--check-config" => Self::CheckConfig,
             Some(value) if value == "--help" || value == "-h" => Self::Help,
             _ => return Err(anyhow!("unknown argument; use --help")),
         };
@@ -31,7 +33,7 @@ impl Command {
 
 pub fn print_help() {
     println!(
-        "Usage: axum-service-scaffold [--init-db | --help]\n\nWithout arguments, start the HTTP server.\n  --init-db  Migrate a persistent SQLite database, repair legacy schema/indexes,\n             seed missing demo accounts, then close the pool and exit.\n             Requires full valid configuration, including JWT settings.\n             Modifies the database; the entire process is not atomic.\n             Exits 0 on success and nonzero on failure; does not start HTTP.\n  --help     Show this help"
+        "Usage: axum-service-scaffold [--init-db | --check-config | --help]\n\nWithout arguments, start the HTTP server.\n  --init-db       Migrate a persistent SQLite database, repair legacy schema/indexes,\n                  seed missing demo accounts, then close the pool and exit.\n                  Requires full valid configuration, including JWT settings.\n                  Modifies the database; the entire process is not atomic.\n                  Exits 0 on success and nonzero on failure; does not start HTTP.\n  --check-config  Check static configuration and exit 0, or nonzero on failure.\n                  Does not check database access, file permissions or port availability.\n  --help          Show this help"
     );
 }
 
