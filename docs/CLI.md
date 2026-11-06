@@ -64,6 +64,7 @@ cargo run --quiet --release --features docs -- --export-openapi > openapi.json
 
 文档内容反映编译模式：debug + docs 包含 dev-login / dev-transfer 路径，release + docs 裁剪这些路径。
 切换 `APP_ENV` 不改变已编译的文档；推荐发布文档时使用 release + docs。
+导出成功只证明当前声明能够生成并输出，不代表接口契约已全面验证或兼容所有下游工具。
 
 ## 验证
 

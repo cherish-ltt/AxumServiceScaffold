@@ -138,6 +138,7 @@ cargo run --quiet --release --features docs -- --export-openapi > openapi.json
 命令不读取 `.env` 或业务配置，不连接数据库、不初始化日志或监听 HTTP，适用于 CI 文档产物。
 必须显式启用 `docs`；release 文档不含调试登录和调试转账路径，debug 文档包含这些路径。
 未启用 `docs`、参数冲突或输出失败时返回非零并向标准错误说明原因。
+导出成功不代表接口契约已全面验证；使用边界见 [CLI 命令](docs/CLI.md)。
 
 ### 健康检查
 
